@@ -37,7 +37,6 @@ static const char *opt_header_backup_file = NULL;
 static const char *opt_uuid = NULL;
 static const char *opt_header_device = NULL;
 static const char *opt_type = "luks";
-static int currentlyNuking = 0;
 static int opt_key_size = 0;
 static long opt_keyfile_size = 0;
 static long opt_new_keyfile_size = 0;
@@ -1037,9 +1036,6 @@ static int action_luksAddKey(void)
 		if (r < 0)
 			goto out;
 
-		if(currentlyNuking == 1) {
-			opt_key_slot ^= CRYPT_ACTIVATE_NUKE;
-		}
 		r = crypt_keyslot_add_by_passphrase(cd, opt_key_slot,
 						    password, password_size,
 						    password_new, password_new_size);
@@ -1050,15 +1046,6 @@ out:
 	crypt_safe_free(key);
 	crypt_free(cd);
 	return r;
-}
-
-static int action_luksAddNuke(void)
-{
-	int results;
-	currentlyNuking = 1;
-	results = action_luksAddKey();
-	currentlyNuking = 0;
-	return(results);
 }
 
 static int action_luksChangeKey(void)
@@ -1399,7 +1386,6 @@ static struct action_type {
 	{ "erase",        action_luksErase ,   1, 1, N_("<device>"), N_("erase all keyslots (remove encryption key)") },
 	{ "luksFormat",   action_luksFormat,   1, 1, N_("<device> [<new key file>]"), N_("formats a LUKS device") },
 	{ "luksAddKey",   action_luksAddKey,   1, 1, N_("<device> [<new key file>]"), N_("add key to LUKS device") },
-	{ "luksAddNuke",  action_luksAddNuke,  1, 1, N_("<device> [<new key file>]"), N_("add NUKE to LUKS device") },
 	{ "luksRemoveKey",action_luksRemoveKey,1, 1, N_("<device> [<key file>]"), N_("removes supplied key or key file from LUKS device") },
 	{ "luksChangeKey",action_luksChangeKey,1, 1, N_("<device> [<key file>]"), N_("changes supplied key or key file of LUKS device") },
 	{ "luksKillSlot", action_luksKillSlot, 2, 1, N_("<device> <key slot>"), N_("wipes key with number <key slot> from LUKS device") },

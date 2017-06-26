@@ -176,9 +176,9 @@ binary-arch: build install
 	dh_installchangelogs -a
 	dh_installdocs -a
 	dh_installexamples -a debian/scripts/gen-ssl-key
-	dh_installinit -a --no-start --name=cryptdisks-early --update-rcd-params="start 26 S . start 59 0 6 ."
+	dh_installinit -a --no-start --name=cryptdisks-early
 	dh_installinit -a --no-start --name=cryptdisks-udev
-	dh_installinit -a --no-start --name=cryptdisks --update-rcd-params="start 28 S . start 48 0 6 ."
+	dh_installinit -a --no-start --name=cryptdisks
 	dh_installman -a debian/doc/crypttab.5 debian/doc/cryptdisks_start.8 debian/doc/cryptdisks_stop.8
 	dh_installman -p cryptsetup-bin debian/luksformat.8
 	# Copy relevant parts to cryptsetup-udeb package

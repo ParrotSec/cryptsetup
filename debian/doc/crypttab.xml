@@ -268,9 +268,9 @@
     <term><emphasis>initramfs</emphasis></term>
     <listitem>
      <simpara>The initramfs hook processes the root device, any resume devices
-      and any devices with the initramfs option set. These devices are processed
-      within the initramfs stage of boot. As an example, that allows the use of
-      remote unlocking using dropbear.
+      and any devices with the <quote>initramfs</quote> option set. These
+      devices are processed within the initramfs stage of boot. As an example,
+      that allows the use of remote unlocking using dropbear.
      </simpara>
     </listitem>
    </varlistentry>
@@ -328,6 +328,14 @@
       be available at the time of execution. Special care needs to be taken for
       encrypted filesystems like /usr or /var. As an example, unlocking
       encrypted /usr must not depend on binaries from /usr/(s)bin.
+     </simpara>
+     <simpara>
+      WARNING: With systemd as init system, this option might be ignored. At
+      the time this is written (December 2016), the systemd cryptsetup helper
+      doesn't support the keyscript option to /etc/crypttab. For the time
+      being, the only option to use keyscripts along with systemd is to force
+      processing of the corresponding crypto devices in the initramfs. See the
+      'initramfs' option for further information.
      </simpara>
      <para>
       All fields of the appropriate crypttab entry are available to the keyscript

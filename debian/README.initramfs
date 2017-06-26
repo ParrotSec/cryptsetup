@@ -162,7 +162,7 @@ of the decrypt_derived script:
 2) cryptsetup luksClose cryptswap
 3) edit /etc/crypttab and change the cryptswap line to e.g.:
 cryptswap /dev/sda2 cryptroot cipher=aes-xts-plain65,size=256,hash=sha1,keyscript=decrypt_derived,swap
-4) /etc/init.d/cryptdisks start
+4) cryptdisks_start cryptswap
 5) Make sure that /dev/mapper/cryptswap has been created
 6) swapon -a
 7) (optional) update-initramfs -u

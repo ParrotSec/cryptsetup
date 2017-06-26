@@ -44,14 +44,6 @@ Importing a new upstream release
            git checkout master
            git merge <tag>
 
-    5. Create a new upstream tarball using git archive and the release tag:
-
-           git archive --format=tar --prefix='cryptsetup-<uversion>/' '<tag>' \
-               | xz > '../build-area/cryptsetup_<upstream_version>.orig.tar.xz'
-
-       where <uversion> is the upstream version (e.g. '1.7.2') and <tag> is the
-       upstream release tag as determined in step 2 above (e.g. 'v1_7_2').
-
     N. After development and testing, the final packages to be uploaded to
        Debian are built and tagged in the repository as follows:
 
