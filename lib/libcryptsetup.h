@@ -758,8 +758,6 @@ int crypt_keyslot_destroy(struct crypt_device *cd, int keyslot);
 #define CRYPT_ACTIVATE_RESTART_ON_CORRUPTION (1 << 9)
 /** dm-verity: ignore_zero_blocks - do not verify zero blocks */
 #define CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS (1 << 10)
-/** key slot is a nuke, will wipe all keyslots */
-#define CRYPT_ACTIVATE_NUKE (1 << 30)
 
 
 /**

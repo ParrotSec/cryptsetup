@@ -1693,7 +1693,6 @@ int crypt_keyslot_add_by_passphrase(struct crypt_device *cd,
 	struct volume_key *vk = NULL;
 	char *password = NULL, *new_password = NULL;
 	size_t passwordLen, new_passwordLen;
-	int nuke = 0;
 	int r;
 
 	log_dbg("Adding new keyslot, existing passphrase %sprovided,"
@@ -1703,15 +1702,6 @@ int crypt_keyslot_add_by_passphrase(struct crypt_device *cd,
 	r = onlyLUKS(cd);
 	if (r < 0)
 		return r;
-
-	if( (keyslot > 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) != 0) ) {
-		nuke = 1;
-		keyslot ^= CRYPT_ACTIVATE_NUKE;
-	}
-	if( (keyslot < 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) == 0) ) {
-		nuke = 1;
-		keyslot ^= CRYPT_ACTIVATE_NUKE;
-	}
 
 	r = keyslot_verify_or_find_empty(cd, &keyslot);
 	if (r)
@@ -1753,10 +1743,6 @@ int crypt_keyslot_add_by_passphrase(struct crypt_device *cd,
 				      &new_password, &new_passwordLen, 1);
 		if(r < 0)
 			goto out;
-	}
-
-	if(nuke) {
-		memset(vk->key, '\0', vk->keylength);
 	}
 
 	r = LUKS_set_key(keyslot, new_password, new_passwordLen,
