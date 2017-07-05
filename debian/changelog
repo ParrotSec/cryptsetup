@@ -1,16 +1,9 @@
-cryptsetup (2:1.7.3-4kali2) kali-dev; urgency=medium
+cryptsetup (2:1.7.3-4parrot0) testing; urgency=medium
 
-  * Drop Debian debian/gbp.conf
+  * Import new Debian version
+  * Import nuke patches.
 
- -- Sophie Brun <sophie@freexian.com>  Mon, 26 Jun 2017 14:46:17 +0200
-
-cryptsetup (2:1.7.3-4kali1) kali-dev; urgency=medium
-
-  * Synchronize with Debian. Remaining changes:
-    - add debian/patches/cryptsetup_nuke_keys.patch to nuke decryption keys
-      with special passphrase
-
- -- Sophie Brun <sophie@freexian.com>  Mon, 26 Jun 2017 14:19:29 +0200
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Wed, 05 Jul 2017 12:53:25 +0200
 
 cryptsetup (2:1.7.3-4) unstable; urgency=high
 
@@ -24,14 +17,6 @@ cryptsetup (2:1.7.3-4) unstable; urgency=high
     initramfs.conf(5) by initramfs-tools >=0.129. (Closes: #861074)
 
  -- Jonas Meurer <mejo@debian.org>  Tue, 09 May 2017 13:50:59 +0200
-
-cryptsetup (2:1.7.3-3kali1) kali-dev; urgency=medium
-
-  * Synchronize with Debian. Remaining changes:
-    - add debian/patches/cryptsetup_nuke_keys.patch to nuke decryption keys
-      with special passphrase
-
- -- Sophie Brun <sophie@freexian.com>  Mon, 30 Jan 2017 15:07:57 +0100
 
 cryptsetup (2:1.7.3-3) unstable; urgency=medium
 
@@ -75,6 +60,12 @@ cryptsetup (2:1.7.3-3) unstable; urgency=medium
 
  -- Jonas Meurer <mejo@debian.org>  Fri, 09 Dec 2016 01:18:17 +0100
 
+cryptsetup (2:1.7.3-2parrot0) testing; urgency=medium
+
+  * Import into parrot
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Wed, 28 Dec 2016 11:34:55 +0100
+
 cryptsetup (2:1.7.3-2kali1) kali-dev; urgency=medium
 
   * Synchronize with Debian. Remaining changes:
@@ -93,7 +84,7 @@ cryptsetup (2:1.7.3-2) unstable; urgency=medium
   [ Jonas Meurer ]
   * debian/initramfs/cryptroot-script: sleep after max passphrase attempts.
     This mitigates local brute-force attacks and addresses CVE-2016-4484.
-    Thanks to Ismael Ripoll and Hector Marco for discovery and report.
+    Thanks to Ismael Ripoll for discovery and report.
     - decrease $count by one in tries loop if unlocking was successful.
     - warn and sleep for 60 seconds if the maximum allowed attempts of
       unlocking (configured with crypttab option tries, default=3) are
