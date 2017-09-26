@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004, Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2015, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2015, Milan Broz
+ * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2017, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -471,7 +471,7 @@ static int action_status(void)
 		log_std("  mode:    %s\n", cad.flags & CRYPT_ACTIVATE_READONLY ?
 					   "readonly" : "read/write");
 		if (cad.flags & (CRYPT_ACTIVATE_ALLOW_DISCARDS|
-				 CRYPT_ACTIVATE_ALLOW_DISCARDS|
+				 CRYPT_ACTIVATE_SAME_CPU_CRYPT|
 				 CRYPT_ACTIVATE_SUBMIT_FROM_CRYPT_CPUS))
 			log_std("  flags:   %s%s%s\n",
 				(cad.flags & CRYPT_ACTIVATE_ALLOW_DISCARDS) ? "discards " : "",
@@ -580,8 +580,8 @@ static int action_benchmark(void)
 					  key_size / 8, iv_size,
 					  &enc_mbr, &dec_mbr);
 		if (!r) {
-			log_std(N_("#  Algorithm | Key |  Encryption |  Decryption\n"));
-			log_std("%8s-%s  %4db  %6.1f MiB/s  %6.1f MiB/s\n",
+			log_std(N_("#     Algorithm | Key |  Encryption |  Decryption\n"));
+			log_std("%11s-%s  %4db  %6.1f MiB/s  %6.1f MiB/s\n",
 				cipher, cipher_mode, key_size, enc_mbr, dec_mbr);
 		} else if (r == -ENOENT)
 			log_err(_("Cipher %s is not available.\n"), opt_cipher);
@@ -602,15 +602,15 @@ static int action_benchmark(void)
 			if (r == -ENOENT)
 				skipped++;
 			if (i == 0)
-				log_std(N_("#  Algorithm | Key |  Encryption |  Decryption\n"));
+				log_std(N_("#     Algorithm | Key |  Encryption |  Decryption\n"));
 
 			snprintf(cipher, MAX_CIPHER_LEN, "%s-%s",
 				 bciphers[i].cipher, bciphers[i].mode);
 			if (!r)
-				log_std("%12s  %4zub  %6.1f MiB/s  %6.1f MiB/s\n",
+				log_std("%15s  %4zub  %6.1f MiB/s  %6.1f MiB/s\n",
 					cipher, bciphers[i].key_size*8, enc_mbr, dec_mbr);
 			else
-				log_std("%12s  %4zub %13s %13s\n", cipher,
+				log_std("%15s  %4zub %13s %13s\n", cipher,
 					bciphers[i].key_size*8, _("N/A"), _("N/A"));
 		}
 		if (skipped && skipped == i)

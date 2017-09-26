@@ -1,4 +1,4 @@
-.TH CRYPTSETUP "8" "December 2013" "cryptsetup" "Maintenance Commands"
+.TH CRYPTSETUP "8" "March 2017" "cryptsetup" "Maintenance Commands"
 .SH NAME
 cryptsetup - manage plain dm-crypt and LUKS encrypted volumes
 .SH SYNOPSIS
@@ -107,10 +107,15 @@ Reports the status for the mapping <name>.
 .IP
 Resizes an active mapping <name>.
 
-If \-\-size (in sectors) is not specified, the size of the
-underlying block device is used. Note that this does not
-change the raw device geometry, it just changes how many
-sectors of the raw device are represented in the mapped device.
+If \-\-size (in sectors) is not specified, the size is computed
+from the underlying device. For LUKS it is the size of the
+underlying device without the area reserved for LUKS header
+(see data payload offset in \fBluksDump\fR command).
+For plain crypt device the whole device size is used.
+
+Note that this does not change the raw device geometry, it just
+changes how many sectors of the raw device are represented
+in the mapped device.
 .SH PLAIN MODE
 Plain dm-crypt encrypts the device sector-by-sector with a
 single, non-salted hash of the passphrase. No checks
@@ -523,7 +528,7 @@ to be erased to prevent further access. Use this option carefully.
 The keyfile parameter allows combination of file content with the
 passphrase and can be repeated.
 .PP
-See also \fBhttp://www.truecrypt.org\fR for more information regarding
+See also \fBhttps://en.wikipedia.org/wiki/TrueCrypt\fR for more information regarding
 TrueCrypt.
 
 Please note that cryptsetup does not use TrueCrypt code, please report
@@ -732,7 +737,7 @@ All other LUKS actions will use the key-size specified in the LUKS header.
 Use \fIcryptsetup \-\-help\fR to show the compiled-in defaults.
 .TP
 .B "\-\-size, \-b <number of 512 byte sectors>"
-Force the size of the underlying device in sectors of 512 bytes.
+Set the size of the device in sectors of 512 bytes.
 This option is only relevant for the \fIopen\fR and \fIresize\fR
 actions.
 .TP
@@ -1071,9 +1076,9 @@ Copyright \(co 2004 Jana Saout
 .br
 Copyright \(co 2004-2006 Clemens Fruhwirth
 .br
-Copyright \(co 2009-2015 Red Hat, Inc.
+Copyright \(co 2009-2017 Red Hat, Inc.
 .br
-Copyright \(co 2009-2015 Milan Broz
+Copyright \(co 2009-2017 Milan Broz
 .br
 Copyright \(co 2012-2014 Arno Wagner
 

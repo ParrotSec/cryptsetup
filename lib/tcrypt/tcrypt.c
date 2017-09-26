@@ -1,8 +1,8 @@
 /*
  * TCRYPT (TrueCrypt-compatible) and VeraCrypt volume handling
  *
- * Copyright (C) 2012, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2015, Milan Broz
+ * Copyright (C) 2012-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2017, Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -469,8 +469,7 @@ static int TCRYPT_pool_keyfile(struct crypt_device *cd,
 		return -EIO;
 	}
 
-	/* FIXME: add while */
-	data_size = read(fd, data, TCRYPT_KEYFILE_LEN);
+	data_size = read_buffer(fd, data, TCRYPT_KEYFILE_LEN);
 	close(fd);
 	if (data_size < 0) {
 		log_err(cd, _("Error reading keyfile %s.\n"), keyfile);
@@ -628,27 +627,26 @@ int TCRYPT_read_phdr(struct crypt_device *cd,
 
 	r = -EIO;
 	if (params->flags & CRYPT_TCRYPT_SYSTEM_HEADER) {
-		if (lseek(devfd, TCRYPT_HDR_SYSTEM_OFFSET, SEEK_SET) >= 0 &&
-		    read_blockwise(devfd, bs, hdr, hdr_size) == hdr_size) {
+		if (read_lseek_blockwise(devfd, bs, hdr, hdr_size,
+			TCRYPT_HDR_SYSTEM_OFFSET) == hdr_size) {
 			r = TCRYPT_init_hdr(cd, hdr, params);
 		}
 	} else if (params->flags & CRYPT_TCRYPT_HIDDEN_HEADER) {
 		if (params->flags & CRYPT_TCRYPT_BACKUP_HEADER) {
-			if (lseek(devfd, TCRYPT_HDR_HIDDEN_OFFSET_BCK, SEEK_END) >= 0 &&
-			    read_blockwise(devfd, bs, hdr, hdr_size) == hdr_size)
+			if (read_lseek_blockwise(devfd, bs, hdr, hdr_size,
+				TCRYPT_HDR_HIDDEN_OFFSET_BCK) == hdr_size)
 				r = TCRYPT_init_hdr(cd, hdr, params);
 		} else {
-			if (lseek(devfd, TCRYPT_HDR_HIDDEN_OFFSET, SEEK_SET) >= 0 &&
-			    read_blockwise(devfd, bs, hdr, hdr_size) == hdr_size)
+			if (read_lseek_blockwise(devfd, bs, hdr, hdr_size,
+				TCRYPT_HDR_HIDDEN_OFFSET) == hdr_size)
 				r = TCRYPT_init_hdr(cd, hdr, params);
-			if (r &&
-			    lseek(devfd, TCRYPT_HDR_HIDDEN_OFFSET_OLD, SEEK_END) >= 0 &&
-			    read_blockwise(devfd, bs, hdr, hdr_size) == hdr_size)
+			if (r && read_lseek_blockwise(devfd, bs, hdr, hdr_size,
+				TCRYPT_HDR_HIDDEN_OFFSET_OLD) == hdr_size)
 				r = TCRYPT_init_hdr(cd, hdr, params);
 		}
 	} else if (params->flags & CRYPT_TCRYPT_BACKUP_HEADER) {
-		if (lseek(devfd, TCRYPT_HDR_OFFSET_BCK, SEEK_END) >= 0 &&
-			    read_blockwise(devfd, bs, hdr, hdr_size) == hdr_size)
+		if (read_lseek_blockwise(devfd, bs, hdr, hdr_size,
+			TCRYPT_HDR_OFFSET_BCK) == hdr_size)
 			r = TCRYPT_init_hdr(cd, hdr, params);
 	} else if (read_blockwise(devfd, bs, hdr, hdr_size) == hdr_size)
 		r = TCRYPT_init_hdr(cd, hdr, params);

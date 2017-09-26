@@ -1,8 +1,8 @@
 /*
  * loopback block device utilities
  *
- * Copyright (C) 2011-2015, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2015, Milan Broz
+ * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2017, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -24,10 +24,9 @@
 
 /* loopback device helpers */
 
-char *crypt_loop_get_device(void);
 char *crypt_loop_backing_file(const char *loop);
 int crypt_loop_device(const char *loop);
-int crypt_loop_attach(const char *loop, const char *file, int offset,
+int crypt_loop_attach(char **loop, const char *file, int offset,
 		      int autoclear, int *readonly);
 int crypt_loop_detach(const char *loop);
 int crypt_loop_resize(const char *loop);

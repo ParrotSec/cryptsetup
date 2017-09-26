@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004, Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2016, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2016, Milan Broz
+ * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2017, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -1187,6 +1187,12 @@ static int _crypt_format_verity(struct crypt_device *cd,
 		cd->u.verity.hdr.data_size = data_device_size / params->data_block_size;
 	} else
 		cd->u.verity.hdr.data_size = params->data_size;
+
+	if (device_is_identical(crypt_metadata_device(cd), crypt_data_device(cd)) &&
+	   (cd->u.verity.hdr.data_size * params->data_block_size) > params->hash_area_offset) {
+		log_err(cd, _("Data area overlaps with hash area.\n"));
+		return -EINVAL;
+	}
 
 	hash_size = crypt_hash_size(params->hash_name);
 	if (hash_size <= 0) {

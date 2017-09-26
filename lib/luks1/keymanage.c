@@ -2,8 +2,8 @@
  * LUKS - Linux Unified Key Setup
  *
  * Copyright (C) 2004-2006, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2012, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2013-2014, Milan Broz
+ * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2013-2017, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -201,7 +201,7 @@ int LUKS_hdr_backup(const char *backup_file, struct crypt_device *ctx)
 		r = -EINVAL;
 		goto out;
 	}
-	if (write(devfd, buffer, buffer_size) < buffer_size) {
+	if (write_buffer(devfd, buffer, buffer_size) < buffer_size) {
 		log_err(ctx, _("Cannot write header backup file %s.\n"), backup_file);
 		r = -EIO;
 		goto out;
@@ -253,7 +253,7 @@ int LUKS_hdr_restore(
 		goto out;
 	}
 
-	if (read(devfd, buffer, buffer_size) < buffer_size) {
+	if (read_buffer(devfd, buffer, buffer_size) < buffer_size) {
 		log_err(ctx, _("Cannot read header backup file %s.\n"), backup_file);
 		r = -EIO;
 		goto out;
@@ -498,7 +498,7 @@ int LUKS_read_phdr_backup(const char *backup_file,
 		return -ENOENT;
 	}
 
-	if (read(devfd, hdr, hdr_size) < hdr_size)
+	if (read_buffer(devfd, hdr, hdr_size) < hdr_size)
 		r = -EIO;
 	else {
 		LUKS_fix_header_compatible(hdr);
@@ -631,9 +631,11 @@ static int LUKS_check_cipher(struct luks_phdr *hdr, struct crypt_device *ctx)
 	if (!empty_key)
 		return -ENOMEM;
 
-	r = LUKS_decrypt_from_storage(buf, sizeof(buf),
-				      hdr->cipherName, hdr->cipherMode,
-				      empty_key, 0, ctx);
+	/* No need to get KEY quality random but it must avoid known weak keys. */
+	r = crypt_random_get(ctx, empty_key->key, empty_key->keylength, CRYPT_RND_NORMAL);
+	if (!r)
+		r = LUKS_decrypt_from_storage(buf, sizeof(buf), hdr->cipherName,
+					      hdr->cipherMode, empty_key, 0, ctx);
 
 	crypt_free_volume_key(empty_key);
 	crypt_memzero(buf, sizeof(buf));
