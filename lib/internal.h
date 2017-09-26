@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004, Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2012, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2012, Milan Broz
+ * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2017, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -76,6 +76,7 @@ int device_read_ahead(struct device *device, uint32_t *read_ahead);
 int device_size(struct device *device, uint64_t *size);
 int device_open(struct device *device, int flags);
 void device_disable_direct_io(struct device *device);
+int device_is_identical(struct device *device1, struct device *device2);
 
 
 enum devcheck { DEV_OK = 0, DEV_EXCL = 1, DEV_SHARED = 2 };
@@ -100,9 +101,12 @@ char *crypt_get_partition_device(const char *dev_path, uint64_t offset, uint64_t
 char *crypt_get_base_device(const char *dev_path);
 uint64_t crypt_dev_partition_offset(const char *dev_path);
 
+ssize_t write_buffer(int fd, const void *buf, size_t count);
+ssize_t read_buffer(int fd, void *buf, size_t count);
 ssize_t write_blockwise(int fd, int bsize, void *buf, size_t count);
-ssize_t read_blockwise(int fd, int bsize, void *_buf, size_t count);
-ssize_t write_lseek_blockwise(int fd, int bsize, char *buf, size_t count, off_t offset);
+ssize_t read_blockwise(int fd, int bsize, void *buf, size_t count);
+ssize_t write_lseek_blockwise(int fd, int bsize, void *buf, size_t count, off_t offset);
+ssize_t read_lseek_blockwise(int fd, int bsize, void *buf, size_t count, off_t offset);
 
 unsigned crypt_getpagesize(void);
 int init_crypto(struct crypt_device *ctx);

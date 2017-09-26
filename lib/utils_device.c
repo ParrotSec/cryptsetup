@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004, Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2015, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2015, Milan Broz
+ * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2017, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -419,25 +419,22 @@ out:
 
 static int device_internal_prepare(struct crypt_device *cd, struct device *device)
 {
-	char *loop_device, *file_path = NULL;
+	char *loop_device = NULL, *file_path = NULL;
 	int r, loop_fd, readonly = 0;
 
 	if (device->init_done)
 		return 0;
 
-	log_dbg("Allocating a free loop device.");
-	loop_device = crypt_loop_get_device();
-	if (!loop_device) {
-		if (getuid() || geteuid())
-			log_err(cd, _("Cannot use a loopback device, "
-				      "running as non-root user.\n"));
-		else
-			log_err(cd, _("Cannot find a free loopback device.\n"));
+	if (getuid() || geteuid()) {
+		log_err(cd, _("Cannot use a loopback device, "
+			      "running as non-root user.\n"));
 		return -ENOTSUP;
 	}
 
+	log_dbg("Allocating a free loop device.");
+
 	/* Keep the loop open, dettached on last close. */
-	loop_fd = crypt_loop_attach(loop_device, device->path, 0, 1, &readonly);
+	loop_fd = crypt_loop_attach(&loop_device, device->path, 0, 1, &readonly);
 	if (loop_fd == -1) {
 		log_err(cd, _("Attaching loopback device failed "
 			"(loop device with autoclear flag is required).\n"));
@@ -534,4 +531,19 @@ size_t size_round_up(size_t size, unsigned int block)
 void device_disable_direct_io(struct device *device)
 {
 	device->o_direct = 0;
+}
+
+int device_is_identical(struct device *device1, struct device *device2)
+{
+	if (device1 == device2)
+		return 1;
+
+	if (!device1 || !device2 || !device_path(device1) || !device_path(device2))
+		return 0;
+
+	/* This should be better check - major/minor for block device etc */
+	if (!strcmp(device_path(device1), device_path(device2)))
+		return 1;
+
+	return 0;
 }

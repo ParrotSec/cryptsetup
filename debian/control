@@ -3,9 +3,9 @@ Section: admin
 Priority: optional
 Maintainer: Debian Cryptsetup Team <pkg-cryptsetup-devel@lists.alioth.debian.org>
 Uploaders: Jonas Meurer <mejo@debian.org>,
- Guilhem Moulin <guilhem@guilhem.org>
+ Guilhem Moulin <guilhem@debian.org>
 Build-Depends: libgcrypt20-dev (>= 1.6.1), libdevmapper-dev (>= 2:1.02.24-4), libpopt-dev, uuid-dev, libselinux1-dev, libsepol1-dev, libtool (>= 2.2), autoconf, automake (>= 1:1.12), pkg-config, autopoint, gettext, debhelper (>= 9.20120410~), xsltproc, docbook-xml, docbook-xsl (>= 1.74.3+dfsg), dpkg-dev (>= 1.15.1), po-debconf, dh-strip-nondeterminism
-Standards-Version: 3.9.8
+Standards-Version: 4.0.0
 Homepage: https://gitlab.com/cryptsetup/cryptsetup
 Vcs-Browser: https://anonscm.debian.org/cgit/pkg-cryptsetup/cryptsetup.git
 Vcs-Git: https://anonscm.debian.org/git/pkg-cryptsetup/cryptsetup.git

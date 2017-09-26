@@ -2,7 +2,7 @@
 #
 # Python bindings to libcryptsetup test
 #
-# Copyright (C) 2011-2014, Red Hat, Inc. All rights reserved.
+# Copyright (C) 2011-2017, Red Hat, Inc. All rights reserved.
 #
 # This file is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -74,7 +74,7 @@ r =  c.isLuks()
 print("isLuks  :", r)
 c.askyes(message = "Is there anybody out there?")
 c.log(priority = pycryptsetup.CRYPT_LOG_ERROR, message = "Nobody there...\n")
-c.luksFormat(cipher = "aes", cipherMode= "xts-plain64", keysize = 512)
+c.luksFormat(cipher = "aes", cipherMode= "xts-plain64", keysize = 512, hashMode = "sha256")
 print("isLuks  :", c.isLuks())
 print("luksUUID:", c.luksUUID())
 print("addKeyVK:", c.addKeyByVolumeKey(newPassphrase = PASSWORD, slot = 2))

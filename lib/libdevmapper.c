@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004, Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2016, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2016, Milan Broz
+ * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2017, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -411,7 +411,7 @@ static char *get_dm_verity_params(struct crypt_params_verity *vp,
 	max_size = strlen(hexroot) + strlen(hexsalt) +
 		   strlen(device_block_path(dmd->data_device)) +
 		   strlen(device_block_path(dmd->u.verity.hash_device)) +
-		   strlen(vp->hash_name) + 128;
+		   strlen(vp->hash_name) + strlen(features) + 128;
 
 	params = crypt_safe_alloc(max_size);
 	if (!params)

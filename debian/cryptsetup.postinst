@@ -22,7 +22,7 @@ case "$1" in
 		fi
 	done
 
-	if [ -x /usr/sbin/update-initramfs ]; then
+	if which update-initramfs >/dev/null; then
 		update-initramfs -u
 	fi
 

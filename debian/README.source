@@ -23,26 +23,30 @@ Importing a new upstream release
 
     1. Update 'upstream' remote
 
-           git fetch upstream
+           git fetch --tags upstream
 
     2. Determine the release tag corresponding to the new release. At the time
        of this wriging, upstream uses tags in the form:
 
-           v<version>
+           TAG="v${VERSION//./_}"
 
-       where <version> is the version number with periods replaced by under-
-       scores. E.g. for upstream release '1.7.2', the release tag is 'v1_7_2'.
-       This convention may change, so double-check with git tag.
+       where ${VERSION//./_} is the $VERSION number with periods replaced by
+       underscores. E.g. for upstream release '1.7.2', the release tag is
+       'v1_7_2'.  This convention may change, so double-check with git tag.
 
     3. Validate the gpg signature for this release tag:
 
-           git verify-tag <tag>
+           git verify-tag "$TAG"
+
+       The signing key can be found in 'debian/upstream-signing-key.asc'.
+       Use `gpg -q debian/upstream-signing-key.asc` to show its
+       fingerprint.
 
     4. Merge the upstream release tag <tag> into the master branch of your
        packaging repository:
 
            git checkout master
-           git merge <tag>
+           git merge -m "Updated version $VERSION from '$TAG'" "$TAG"
 
     N. After development and testing, the final packages to be uploaded to
        Debian are built and tagged in the repository as follows:

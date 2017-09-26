@@ -11,7 +11,7 @@
  /**
 --- a/lib/luks1/keymanage.c
 +++ b/lib/luks1/keymanage.c
-@@ -964,6 +964,24 @@ static int LUKS_open_key(unsigned int ke
+@@ -966,6 +966,24 @@ static int LUKS_open_key(unsigned int ke
  
  	if (!r)
  		log_verbose(ctx, _("Key slot %d unlocked.\n"), keyIndex);
@@ -38,7 +38,7 @@
  	crypt_free_volume_key(derived_key);
 --- a/lib/setup.c
 +++ b/lib/setup.c
-@@ -1693,6 +1693,7 @@ int crypt_keyslot_add_by_passphrase(stru
+@@ -1699,6 +1699,7 @@ int crypt_keyslot_add_by_passphrase(stru
  	struct volume_key *vk = NULL;
  	char *password = NULL, *new_password = NULL;
  	size_t passwordLen, new_passwordLen;
@@ -46,7 +46,7 @@
  	int r;
  
  	log_dbg("Adding new keyslot, existing passphrase %sprovided,"
-@@ -1703,6 +1704,15 @@ int crypt_keyslot_add_by_passphrase(stru
+@@ -1709,6 +1710,15 @@ int crypt_keyslot_add_by_passphrase(stru
  	if (r < 0)
  		return r;
  
@@ -62,7 +62,7 @@
  	r = keyslot_verify_or_find_empty(cd, &keyslot);
  	if (r)
  		return r;
-@@ -1745,6 +1755,10 @@ int crypt_keyslot_add_by_passphrase(stru
+@@ -1751,6 +1761,10 @@ int crypt_keyslot_add_by_passphrase(stru
  			goto out;
  	}
  

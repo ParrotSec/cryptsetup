@@ -21,7 +21,7 @@ Copyright: © 2008 David Härdeman <david@hardeman.nu>
 License: GPL-2+
 
 Files: debian/initramfs/cryptroot-unlock
-Copyright: © 2015 Guilhem Moulin <guilhem@guilhem.org>
+Copyright: © 2015 Guilhem Moulin <guilhem@debian.org>
 License: GPL-2+
 
 Files: debian/README.openct
