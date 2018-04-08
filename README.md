@@ -9,7 +9,10 @@ These include **plain** **dm-crypt** volumes, **LUKS** volumes, **loop-AES**
 and **TrueCrypt** (including **VeraCrypt** extension) format.
 
 Project also includes **veritysetup** utility used to conveniently setup
-[DMVerity](https://gitlab.com/cryptsetup/cryptsetup/wikis/DMVerity) block integrity checking kernel module.
+[DMVerity](https://gitlab.com/cryptsetup/cryptsetup/wikis/DMVerity) block integrity checking kernel module
+and, since version 2.0,  **integritysetup** to setup
+[DMIntegrity](https://gitlab.com/cryptsetup/cryptsetup/wikis/DMIntegrity) block integrity kernel module.
+
 
 LUKS Design
 -----------
@@ -18,9 +21,12 @@ only facilitate compatibility among distributions, but also provides secure mana
 In contrast to existing solution, LUKS stores all setup necessary setup information in the partition header,  
 enabling the user to transport or migrate his data seamlessly.
 
+Last version of the LUKS format specification is
+[available here](https://www.kernel.org/pub/linux/utils/cryptsetup/LUKS_docs/on-disk-format.pdf).
+
 Why LUKS?
 ---------
- * compatiblity via standardization,
+ * compatibility via standardization,
  * secure against low entropy attacks,
  * support for multiple keys,
  * effective passphrase revocation,
@@ -36,13 +42,19 @@ Download
 --------
 All release tarballs and release notes are hosted on [kernel.org](https://www.kernel.org/pub/linux/utils/cryptsetup/).
 
-**The latest cryptsetup version is 1.7.4**
-  * [cryptsetup-1.7.4.tar.xz](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/cryptsetup-1.7.4.tar.xz)
-  * Signature [cryptsetup-1.7.4.tar.sign](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/cryptsetup-1.7.4.tar.sign)
+**The latest cryptsetup version is 2.0.0**
+  * [cryptsetup-2.0.0.tar.xz](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.0.tar.xz)
+  * Signature [cryptsetup-2.0.0.tar.sign](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.0.tar.sign)
     _(You need to decompress file first to check signature.)_
-  * [Cryptsetup 1.7.4 Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/v1.7.4-ReleaseNotes).
+  * [Cryptsetup 2.0.0 Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.0-ReleaseNotes).
 
 Previous versions
+ * [Version 1.7.5](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/cryptsetup-1.7.5.tar.xz) -
+   [Signature](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/cryptsetup-1.7.5.tar.sign) -
+   [Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/v1.7.5-ReleaseNotes).
+ * [Version 1.7.4](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/cryptsetup-1.7.4.tar.xz) -
+   [Signature](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/cryptsetup-1.7.4.tar.sign) -
+   [Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/v1.7.4-ReleaseNotes).
  * [Version 1.7.3](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/cryptsetup-1.7.3.tar.xz) -
    [Signature](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/cryptsetup-1.7.3.tar.sign) -
    [Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v1.7/v1.7.3-ReleaseNotes).
@@ -75,4 +87,4 @@ For cryptsetup and LUKS related questions, please use the dm-crypt mailing list,
 If you want to subscribe just send an empty mail to [dm-crypt-subscribe@saout.de](mailto:dm-crypt-subscribe@saout.de).
 
 You can also browse [list archive](http://www.saout.de/pipermail/dm-crypt/) or read it through
-[web interface](http://news.gmane.org/gmane.linux.kernel.device-mapper.dm-crypt).
+[web interface](https://marc.info/?l=dm-crypt).

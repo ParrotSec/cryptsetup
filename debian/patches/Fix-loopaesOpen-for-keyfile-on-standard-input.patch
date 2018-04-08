@@ -1,0 +1,91 @@
+From 8728ba08e2e056a4c18b55407146eea7ac0043c6 Mon Sep 17 00:00:00 2001
+From: Milan Broz <gmazyland@gmail.com>
+Date: Wed, 24 Jan 2018 08:58:57 +0100
+Subject: [PATCH] Fix loopaesOpen for keyfile on standard input.
+
+The change in keyfile processing caused that special loopAES
+keyfiles are no longer read from stdin if key-file argument is "-".
+
+Fix it by using /dev/stdin in cryptsetup if "-" is detected.
+(The libcryptsetup API no longer parses spacial meaning of "-" internally).
+
+Fixes #888162.
+---
+ src/cryptsetup.c   |  4 ++--
+ tests/loopaes-test | 20 +++++++++++++-------
+ 2 files changed, 15 insertions(+), 9 deletions(-)
+
+diff --git a/src/cryptsetup.c b/src/cryptsetup.c
+index 9399e799..c6fb4480 100644
+--- a/src/cryptsetup.c
++++ b/src/cryptsetup.c
+@@ -271,8 +271,8 @@ static int action_open_loopaes(void)
+ 		goto out;
+ 
+ 	r = crypt_activate_by_keyfile_device_offset(cd, action_argv[1], CRYPT_ANY_SLOT,
+-				      opt_key_file, opt_keyfile_size,
+-				      opt_keyfile_offset, activate_flags);
++		tools_is_stdin(opt_key_file) ? "/dev/stdin" : opt_key_file, opt_keyfile_size,
++		opt_keyfile_offset, activate_flags);
+ out:
+ 	crypt_free(cd);
+ 
+diff --git a/tests/loopaes-test b/tests/loopaes-test
+index debc7888..e8d85231 100755
+--- a/tests/loopaes-test
++++ b/tests/loopaes-test
+@@ -87,7 +87,7 @@ function get_expsum() # $offset
+ 	esac
+ }
+ 
+-function check_sum() # $key $keysize $offset
++function check_sum() # $key $keysize $offset [stdin|keyfile]
+ {
+ 	# Fill device with zeroes and reopen it
+ 	dd if=/dev/zero of=/dev/mapper/$DEV_NAME bs=1k $LOOP_DD_PARAM >/dev/null 2>&1
+@@ -95,14 +95,18 @@ function check_sum() # $key $keysize $offset
+ 	dmremove $DEV_NAME
+ 
+ 	EXPSUM=$(get_expsum $3)
+-	$CRYPTSETUP loopaesOpen $LOOPDEV $DEV_NAME -s $2 --key-file $1 $(get_offset_params $3) >/dev/null 2>&1
++	if [ "$4" == "stdin" ] ; then
++		cat $1 | $CRYPTSETUP loopaesOpen $LOOPDEV $DEV_NAME -s $2 --key-file - $(get_offset_params $3) >/dev/null 2>&1
++	else
++		$CRYPTSETUP loopaesOpen $LOOPDEV $DEV_NAME -s $2 --key-file $1 $(get_offset_params $3) >/dev/null 2>&1
++	fi
+ 	ret=$?
+ 	VSUM=$(sha256sum /dev/mapper/$DEV_NAME | cut -d' ' -f 1)
+ 	if [ $ret -eq 0 -a "$VSUM" = "$EXPSUM" ] ; then
+-		echo -n "[OK]"
++		echo -n "[$4:OK]"
+ 	else
+-		echo "[FAIL]"
+-		echo " Expecting $EXPSUM got $VSUM."
++		echo "[$4:FAIL]"
++		[ "$VSUM" != "$EXPSUM" ] && echo " Expecting $EXPSUM got $VSUM."
+ 		fail
+ 	fi
+ }
+@@ -121,7 +125,7 @@ function check_sum_losetup() # $key $alg
+ 		echo "[OK]"
+ 	else
+ 		echo "[FAIL]"
+-		echo " Expecting $EXPSUM got $VSUM (loop-AES)."
++		[ "$VSUM" != "$EXPSUM" ] && echo " Expecting $EXPSUM got $VSUM (loop-AES)."
+ 		fail
+ 	fi
+ 	losetup -d $LOOPDEV >/dev/null 2>&1
+@@ -157,7 +161,9 @@ for key_size in $KEY_SIZES ; do
+ 			2>/dev/null
+ 		[ $? -ne 0 ] && echo "[SKIPPED]" && continue
+ 		check_exists
+-		check_sum $key $key_size $offset
++		check_sum $key $key_size $offset keyfile
++		$CRYPTSETUP loopaesClose $DEV_NAME || fail
++		check_sum $key $key_size $offset stdin
+ 		$CRYPTSETUP loopaesClose $DEV_NAME || fail
+ 		check_sum_losetup $key AES$key_size $offset
+         done
+-- 
+2.15.1
+

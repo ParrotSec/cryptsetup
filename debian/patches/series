@@ -1,1 +1,2 @@
 cryptsetup_nuke_keys.patch
+Fix-loopaesOpen-for-keyfile-on-standard-input.patch

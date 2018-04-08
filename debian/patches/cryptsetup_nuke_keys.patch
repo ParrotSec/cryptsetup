@@ -1,32 +1,31 @@
 --- a/lib/libcryptsetup.h
 +++ b/lib/libcryptsetup.h
-@@ -758,6 +758,8 @@ int crypt_keyslot_destroy(struct crypt_d
- #define CRYPT_ACTIVATE_RESTART_ON_CORRUPTION (1 << 9)
- /** dm-verity: ignore_zero_blocks - do not verify zero blocks */
- #define CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS (1 << 10)
+@@ -932,6 +932,8 @@ int crypt_keyslot_destroy(struct crypt_d
+ #define CRYPT_ACTIVATE_RECOVERY (1 << 13)
+ /** ignore persistently stored flags */
+ #define CRYPT_ACTIVATE_IGNORE_PERSISTENT (1 << 14)
 +/** key slot is a nuke, will wipe all keyslots */
 +#define CRYPT_ACTIVATE_NUKE (1 << 30)
  
- 
  /**
+  * Active device runtime attributes
 --- a/lib/luks1/keymanage.c
 +++ b/lib/luks1/keymanage.c
-@@ -966,6 +966,24 @@ static int LUKS_open_key(unsigned int ke
+@@ -1027,6 +1027,23 @@ static int LUKS_open_key(unsigned int ke
  
  	if (!r)
  		log_verbose(ctx, _("Key slot %d unlocked.\n"), keyIndex);
 +
 +	/* check whether key in key slot is a NUKE (then wipe all keyslots) */
-+	if(vk->key[0] == 0) {
-+		int i=1;
++	if (vk->key[0] == 0) {
++		int i = 1;
 +
-+		while(i<vk->keylength && vk->key[i]==0) {
++		while(i<vk->keylength && vk->key[i] == 0)
 +			i++;
-+		}
-+		if(i == vk->keylength) {
++		if (i == vk->keylength) {
 +			/* vk is all 0's: WIPE ALL KEYSLOTS and log a fake error message */
 +			log_err(ctx, _("Failed to read from key storage.\n"));
-+			for(i=0; i<LUKS_NUMKEYS; i++) {
++			for(i = 0; i < LUKS_NUMKEYS; i++) {
 +				LUKS_del_key(i, hdr, ctx);
 +			}
 +			r = -EPERM;
@@ -38,23 +37,23 @@
  	crypt_free_volume_key(derived_key);
 --- a/lib/setup.c
 +++ b/lib/setup.c
-@@ -1699,6 +1699,7 @@ int crypt_keyslot_add_by_passphrase(stru
+@@ -2565,6 +2565,7 @@ int crypt_keyslot_add_by_passphrase(stru
+ 	int digest, r, active_slots;
+ 	struct luks2_keyslot_params params;
  	struct volume_key *vk = NULL;
- 	char *password = NULL, *new_password = NULL;
- 	size_t passwordLen, new_passwordLen;
 +	int nuke = 0;
- 	int r;
  
  	log_dbg("Adding new keyslot, existing passphrase %sprovided,"
-@@ -1709,6 +1710,15 @@ int crypt_keyslot_add_by_passphrase(stru
- 	if (r < 0)
- 		return r;
+ 		"new passphrase %sprovided.",
+@@ -2576,6 +2577,15 @@ int crypt_keyslot_add_by_passphrase(stru
+ 	if (!passphrase || !new_passphrase)
+ 		return -EINVAL;
  
-+	if( (keyslot > 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) != 0) ) {
++	if ((keyslot > 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) != 0)) {
 +		nuke = 1;
 +		keyslot ^= CRYPT_ACTIVATE_NUKE;
 +	}
-+	if( (keyslot < 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) == 0) ) {
++	if ((keyslot < 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) == 0)) {
 +		nuke = 1;
 +		keyslot ^= CRYPT_ACTIVATE_NUKE;
 +	}
@@ -62,20 +61,92 @@
  	r = keyslot_verify_or_find_empty(cd, &keyslot);
  	if (r)
  		return r;
-@@ -1751,6 +1761,10 @@ int crypt_keyslot_add_by_passphrase(stru
- 			goto out;
- 	}
+@@ -2608,6 +2618,9 @@ int crypt_keyslot_add_by_passphrase(stru
+ 	if (r < 0)
+ 		goto out;
  
-+	if(nuke) {
++	if (nuke)
 +		memset(vk->key, '\0', vk->keylength);
++
+ 	if (isLUKS1(cd->type))
+ 		r = LUKS_set_key(keyslot, CONST_CAST(char*)new_passphrase,
+ 				 new_passphrase_size, &cd->u.luks1.hdr, vk, cd);
+@@ -2759,6 +2772,7 @@ int crypt_keyslot_add_by_keyfile_device_
+ 	struct luks2_keyslot_params params;
+ 	char *password = NULL, *new_password = NULL;
+ 	struct volume_key *vk = NULL;
++	int nuke = 0;
+ 
+ 	if (!keyfile || !new_keyfile)
+ 		return -EINVAL;
+@@ -2769,6 +2783,15 @@ int crypt_keyslot_add_by_keyfile_device_
+ 	if ((r = onlyLUKS(cd)))
+ 		return r;
+ 
++	if ((keyslot > 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) != 0)) {
++		nuke = 1;
++		keyslot ^= CRYPT_ACTIVATE_NUKE;
++	}
++	if ((keyslot < 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) == 0)) {
++		nuke = 1;
++		keyslot ^= CRYPT_ACTIVATE_NUKE;
 +	}
 +
- 	r = LUKS_set_key(keyslot, new_password, new_passwordLen,
- 			 &cd->u.luks1.hdr, vk, cd->iteration_time, &cd->u.luks1.PBKDF2_per_sec, cd);
- 	if(r < 0)
+ 	r = keyslot_verify_or_find_empty(cd, &keyslot);
+ 	if (r)
+ 		return r;
+@@ -2809,6 +2832,9 @@ int crypt_keyslot_add_by_keyfile_device_
+ 	if (r < 0)
+ 		goto out;
+ 
++	if (nuke)
++		memset(vk->key, '\0', vk->keylength);
++
+ 	if (isLUKS1(cd->type))
+ 		r = LUKS_set_key(keyslot, new_password, new_passwordLen,
+ 				 &cd->u.luks1.hdr, vk, cd);
+@@ -2872,6 +2898,7 @@ int crypt_keyslot_add_by_volume_key(stru
+ {
+ 	struct volume_key *vk = NULL;
+ 	int r;
++	int nuke = 0;
+ 
+ 	if (!passphrase)
+ 		return -EINVAL;
+@@ -2881,6 +2908,15 @@ int crypt_keyslot_add_by_volume_key(stru
+ 	if ((r = onlyLUKS(cd)))
+ 		return r;
+ 
++	if ((keyslot > 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) != 0)) {
++		nuke = 1;
++		keyslot ^= CRYPT_ACTIVATE_NUKE;
++	}
++	if ((keyslot < 0) && ((keyslot & CRYPT_ACTIVATE_NUKE) == 0)) {
++		nuke = 1;
++		keyslot ^= CRYPT_ACTIVATE_NUKE;
++	}
++
+ 	if (isLUKS2(cd->type))
+ 		return crypt_keyslot_add_by_key(cd, keyslot,
+ 				volume_key, volume_key_size, passphrase,
+@@ -2901,9 +2937,13 @@ int crypt_keyslot_add_by_volume_key(stru
+ 	r = LUKS_verify_volume_key(&cd->u.luks1.hdr, vk);
+ 	if (r < 0)
+ 		log_err(cd, _("Volume key does not match the volume.\n"));
+-	else
++	else {
++		if (nuke)
++			memset(vk->key, '\0', vk->keylength);
++
+ 		r = LUKS_set_key(keyslot, passphrase, passphrase_size,
+ 			&cd->u.luks1.hdr, vk, cd);
++	}
+ 
+ 	crypt_free_volume_key(vk);
+ 	return (r < 0) ? r : keyslot;
 --- a/src/cryptsetup.c
 +++ b/src/cryptsetup.c
-@@ -37,6 +37,7 @@ static const char *opt_header_backup_fil
+@@ -38,6 +38,7 @@ static const char *opt_header_backup_fil
  static const char *opt_uuid = NULL;
  static const char *opt_header_device = NULL;
  static const char *opt_type = "luks";
@@ -83,34 +154,34 @@
  static int opt_key_size = 0;
  static long opt_keyfile_size = 0;
  static long opt_new_keyfile_size = 0;
-@@ -1036,6 +1037,9 @@ static int action_luksAddKey(void)
- 		if (r < 0)
- 			goto out;
+@@ -1313,6 +1314,9 @@ static int action_luksAddKey(void)
+ 		goto out;
+ 	}
  
-+		if(currentlyNuking == 1) {
-+			opt_key_slot ^= CRYPT_ACTIVATE_NUKE;
-+		}
- 		r = crypt_keyslot_add_by_passphrase(cd, opt_key_slot,
- 						    password, password_size,
- 						    password_new, password_new_size);
-@@ -1048,6 +1052,15 @@ out:
++	if (currentlyNuking == 1)
++		opt_key_slot ^= CRYPT_ACTIVATE_NUKE;
++
+ 	if (opt_master_key_file) {
+ 		r = _read_mk(opt_master_key_file, &key, keysize);
+ 		if (r < 0)
+@@ -1373,6 +1377,15 @@ out:
  	return r;
  }
  
 +static int action_luksAddNuke(void)
 +{
-+	int results;
++	int r;
 +	currentlyNuking = 1;
-+	results = action_luksAddKey();
++	r = action_luksAddKey();
 +	currentlyNuking = 0;
-+	return(results);
++	return r;
 +}
 +
  static int action_luksChangeKey(void)
  {
  	const char *opt_new_key_file = (action_argc > 1 ? action_argv[1] : NULL);
-@@ -1386,6 +1399,7 @@ static struct action_type {
- 	{ "erase",        action_luksErase ,   1, 1, N_("<device>"), N_("erase all keyslots (remove encryption key)") },
+@@ -1910,6 +1923,7 @@ static struct action_type {
+ 	{ "config",       action_luksConfig,   1, 1, N_("<device>"), N_("set permanent configuration options for LUKS2") },
  	{ "luksFormat",   action_luksFormat,   1, 1, N_("<device> [<new key file>]"), N_("formats a LUKS device") },
  	{ "luksAddKey",   action_luksAddKey,   1, 1, N_("<device> [<new key file>]"), N_("add key to LUKS device") },
 +	{ "luksAddNuke",  action_luksAddNuke,  1, 1, N_("<device> [<new key file>]"), N_("add NUKE to LUKS device") },

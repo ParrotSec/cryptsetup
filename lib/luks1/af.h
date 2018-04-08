@@ -2,7 +2,7 @@
  * AFsplitter - Anti forensic information splitter
  *
  * Copyright (C) 2004, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
  *
  * AFsplitter diffuses information over a large stripe of data,
  * therefor supporting secure data destruction.
@@ -37,8 +37,24 @@
  * On error, both functions return -1, 0 otherwise.
  */
 
-int AF_split(char *src, char *dst, size_t blocksize, unsigned int blocknumbers, const char *hash);
-int AF_merge(char *src, char *dst, size_t blocksize, unsigned int blocknumbers, const char *hash);
+int AF_split(const char *src, char *dst, size_t blocksize, unsigned int blocknumbers, const char *hash);
+int AF_merge(const char *src, char *dst, size_t blocksize, unsigned int blocknumbers, const char *hash);
 size_t AF_split_sectors(size_t blocksize, unsigned int blocknumbers);
+
+int LUKS_encrypt_to_storage(
+	char *src, size_t srcLength,
+	const char *cipher,
+	const char *cipher_mode,
+	struct volume_key *vk,
+	unsigned int sector,
+	struct crypt_device *ctx);
+
+int LUKS_decrypt_from_storage(
+	char *dst, size_t dstLength,
+	const char *cipher,
+	const char *cipher_mode,
+	struct volume_key *vk,
+	unsigned int sector,
+	struct crypt_device *ctx);
 
 #endif

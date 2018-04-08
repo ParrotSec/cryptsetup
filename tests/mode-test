@@ -2,7 +2,7 @@
 #
 # Test mode compatibility, check input + kernel and cryptsetup cipher status
 #
-CRYPTSETUP=../src/cryptsetup
+CRYPTSETUP=../cryptsetup
 DEV_NAME=dmc_test
 HEADER_IMG=mode-test.img
 PASSWORD=3xrododenron
@@ -40,7 +40,7 @@ fail()
 skip()
 {
 	[ -n "$1" ] && echo "$1"
-	exit 0
+	exit 77
 }
 
 add_device() {
@@ -137,7 +137,7 @@ dmcrypt aes-plain aes-cbc-plain
 # empty cipher
 PASSWORD=""
 dmcrypt null cipher_null-ecb
-dmcrypt cipher_null cipher_null-cbc-plain
+dmcrypt cipher_null cipher_null-ecb
 dmcrypt cipher_null-ecb
 
 PASSWORD=$PASSWORD1

@@ -1,9 +1,92 @@
-cryptsetup (2:1.7.5-1parrot0) testing; urgency=medium
+cryptsetup (2:2.0.1-1parrot1) testing; urgency=medium
 
-  * Import new Debian release.
-  * Import nuke patches.
+  * Non-maintainer upload.
+  * Rebuild on Parro Build System.
 
- -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Tue, 26 Sep 2017 21:41:28 +0200
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Mon, 09 Apr 2018 01:01:02 +0200
+
+cryptsetup (2:2.0.1-1kali1) kali-dev; urgency=medium
+
+  [ Sophie Brun ]
+  * Synchronize with Debian. Remaining changes:
+    - add debian/patches/cryptsetup_nuke_keys.patch to nuke decryption keys
+      with special passphrase
+
+  [ Raphaël Hertzog ]
+  * Add DEP-8 autopkgtests to ensure that our nuke patch works.
+
+ -- Sophie Brun <sophie@freexian.com>  Thu, 22 Feb 2018 10:48:56 +0100
+
+cryptsetup (2:2.0.1-1) unstable; urgency=low
+
+  * New upstream release 2.0.1:
+    - Use /run/cryptsetup as default for cryptsetup locking dir.
+    - Add missing symbols for new functions to debian/libcryptsetup12.symbols.
+  * debian/copyright: update copyright years.
+  * debian/patches: backport upstream's 8728ba08 to fix opening of loop-AES
+    devices using --key-file=-.  (Closes: #888162.)
+  * debian/rules: replace `autoreconf -f -i` with `dh_autoreconf` and add
+    `dh_autoreconf_clean` to the "clean:" target.  This bumps the minimum
+    debhelper version to 9.20160403~ in Build-Depends. (Closes: #888742.)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sun, 11 Feb 2018 00:02:05 +0100
+
+cryptsetup (2:2.0.0-1) unstable; urgency=low
+
+  [ Guilhem Moulin ]
+  * cryptsetup-bin: Install /usr/lib/tmpfiles.d/cryptsetup.conf to create the
+    LUKS2 locking directory /run/lock/cryptsetup.  For sysVinit, this is taken
+    care of by the cryptdisks-early init file.
+  * Remove debian/patches/Use-system-libargon2.patch (applied upstream).
+  * debian/README.{source,gbp.conf}: Upgrade to latest upstream conventions.
+  * debian/control: Bump Standards-Version to 4.1.3 (remove verbatim copy of
+    CC0-1.0 license from debian/copyright).
+  * debian/rules: Fix symlink target of libcryptsetup.so in libcryptsetup-dev
+    package.  Thanks to Alan Fung for the report and patch.  (Closes: #885435.)
+  * debian/initramfs/cryptroot-{hook,script}: Add support for 'skip' and
+    'offset' crypttab(5) options in the initramfs script.  Thanks to Pascal
+    Liehne for the report and patch.  (Closes: #872342.)
+
+  [ Jonas Meurer ]
+  * debian/initramfs/cryptopensc-*: Install required libs and config files for
+    pcscd and use correct path to pcscd. Thanks to Martijn van de Streek for
+    bugreport and patch. (Closes: #880750)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Mon, 22 Jan 2018 00:25:52 +0100
+
+cryptsetup (2:2.0.0~rc1-1) experimental; urgency=low
+
+  * debian/rules: Compile with --enable-libargon2 to use system libargon2
+    instead of bundled version.
+  * debian/control: Bump Standards-Version to 4.1.1 (no changes necessary).
+  * debian/copyright: Update licensing information.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Wed, 01 Nov 2017 17:37:15 +0100
+
+cryptsetup (2:2.0.0~rc0-1) experimental; urgency=low
+
+  * New upstream release 2.0.0 RC0 (closes: #877566).  Highlights include:
+    - Support for new on-disk LUKS2 format, offering authenticated disk
+      encrption (EXPERIMENTAL), memory-hard PBKDF (argon2), kernel keyring for
+      storage of key material, and more.
+    - New CLI `integritysetup` which can setup standalone dm-integrity devices.
+    - soname bump of libcryptsetup library.
+  * Rename library package from libcryptsetup4 to libcryptsetup12.
+  * Also remove deprecated upstart configuration files on upgrade and purge.
+    (Closes: #883677)
+  * debian/control: Bump Standards-Version to 4.1.0 (no changes necessary).
+  * debian/*: Apply wrap-and-sort(1).
+  * debian/copyright: Update copyright years.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Tue, 03 Oct 2017 03:37:36 +0200
+
+cryptsetup (2:1.7.5-1kali1) kali-dev; urgency=medium
+
+  * Synchronize with Debian. Remaining changes:
+    - add debian/patches/cryptsetup_nuke_keys.patch to nuke decryption keys
+      with special passphrase
+
+ -- Sophie Brun <sophie@freexian.com>  Tue, 26 Sep 2017 07:12:33 +0200
 
 cryptsetup (2:1.7.5-1) unstable; urgency=low
 
@@ -27,12 +110,19 @@ cryptsetup (2:1.7.5-1) unstable; urgency=low
 
  -- Guilhem Moulin <guilhem@debian.org>  Thu, 14 Sep 2017 13:00:23 +0200
 
-cryptsetup (2:1.7.3-4parrot0) testing; urgency=medium
+cryptsetup (2:1.7.3-4kali2) kali-dev; urgency=medium
 
-  * Import new Debian version
-  * Import nuke patches.
+  * Drop Debian debian/gbp.conf
 
- -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Wed, 05 Jul 2017 12:53:25 +0200
+ -- Sophie Brun <sophie@freexian.com>  Mon, 26 Jun 2017 14:46:17 +0200
+
+cryptsetup (2:1.7.3-4kali1) kali-dev; urgency=medium
+
+  * Synchronize with Debian. Remaining changes:
+    - add debian/patches/cryptsetup_nuke_keys.patch to nuke decryption keys
+      with special passphrase
+
+ -- Sophie Brun <sophie@freexian.com>  Mon, 26 Jun 2017 14:19:29 +0200
 
 cryptsetup (2:1.7.3-4) unstable; urgency=high
 
@@ -46,6 +136,14 @@ cryptsetup (2:1.7.3-4) unstable; urgency=high
     initramfs.conf(5) by initramfs-tools >=0.129. (Closes: #861074)
 
  -- Jonas Meurer <mejo@debian.org>  Tue, 09 May 2017 13:50:59 +0200
+
+cryptsetup (2:1.7.3-3kali1) kali-dev; urgency=medium
+
+  * Synchronize with Debian. Remaining changes:
+    - add debian/patches/cryptsetup_nuke_keys.patch to nuke decryption keys
+      with special passphrase
+
+ -- Sophie Brun <sophie@freexian.com>  Mon, 30 Jan 2017 15:07:57 +0100
 
 cryptsetup (2:1.7.3-3) unstable; urgency=medium
 
@@ -89,12 +187,6 @@ cryptsetup (2:1.7.3-3) unstable; urgency=medium
 
  -- Jonas Meurer <mejo@debian.org>  Fri, 09 Dec 2016 01:18:17 +0100
 
-cryptsetup (2:1.7.3-2parrot0) testing; urgency=medium
-
-  * Import into parrot
-
- -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Wed, 28 Dec 2016 11:34:55 +0100
-
 cryptsetup (2:1.7.3-2kali1) kali-dev; urgency=medium
 
   * Synchronize with Debian. Remaining changes:
@@ -113,7 +205,7 @@ cryptsetup (2:1.7.3-2) unstable; urgency=medium
   [ Jonas Meurer ]
   * debian/initramfs/cryptroot-script: sleep after max passphrase attempts.
     This mitigates local brute-force attacks and addresses CVE-2016-4484.
-    Thanks to Ismael Ripoll for discovery and report.
+    Thanks to Ismael Ripoll and Hector Marco for discovery and report.
     - decrease $count by one in tries loop if unlocking was successful.
     - warn and sleep for 60 seconds if the maximum allowed attempts of
       unlocking (configured with crypttab option tries, default=3) are

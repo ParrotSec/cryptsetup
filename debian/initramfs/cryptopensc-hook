@@ -51,8 +51,13 @@ done
 # Install pcscd daemon, drivers, conf file, and include libgcc as well since
 # pcscd utilizes pthread_cancel
 copy_exec /usr/sbin/pcscd
+copy_exec /lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/libgcc_s.so.1
+copy_exec /lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/libusb-1.0.so.0
+copy_exec /lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/libusb-1.0.so.0.1.0
+copy_exec /usr/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/libpcsclite.so.1
 cp -r /usr/lib/pcsc ${DESTDIR}/usr/lib
-cp /etc/reader.conf ${DESTDIR}/etc
+cp /etc/reader.conf ${DESTDIR}/etc || true
+cp /etc/libccid_Info.plist ${DESTDIR}/etc
 
 # Install opensc commands and conf file
 copy_exec /usr/bin/opensc-tool

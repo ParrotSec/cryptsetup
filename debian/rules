@@ -44,12 +44,13 @@ configure: configure-stamp
 configure-stamp:
 	dh_testdir
 	find -xtype f ! -name manifest >manifest
-	autoreconf --force --install
+	dh_autoreconf
 	./configure $(confflags)  \
 		--prefix=/usr \
 		--libdir=/lib \
 		--sbindir=/sbin \
 		--mandir=/usr/share/man \
+		--enable-libargon2 \
 		--enable-shared \
 		--enable-cryptsetup-reencrypt
 	find -xtype f >manifest.new
@@ -91,16 +92,16 @@ install-stamp: build-stamp
 	dh_clean
 	dh_installdirs
 	mkdir -p $(CURDIR)/debian/cryptsetup-udeb
-	mkdir -p $(CURDIR)/debian/libcryptsetup4-udeb
+	mkdir -p $(CURDIR)/debian/libcryptsetup12-udeb
 	$(MAKE) DESTDIR=$(CURDIR)/debian/cryptsetup-bin install
 
 	# Copy library files to library packages
-	mkdir -p $(CURDIR)/debian/libcryptsetup4/lib/$(DEB_HOST_MULTIARCH)/
+	mkdir -p $(CURDIR)/debian/libcryptsetup12/lib/$(DEB_HOST_MULTIARCH)/
 	mkdir -p $(CURDIR)/debian/libcryptsetup-dev/usr/lib/$(DEB_HOST_MULTIARCH)/pkgconfig
-	#mkdir -p $(CURDIR)/debian/libcryptsetup4/usr/lib/$(DEB_HOST_MULTIARCH)/
+	#mkdir -p $(CURDIR)/debian/libcryptsetup12/usr/lib/$(DEB_HOST_MULTIARCH)/
 
 	cp -a $(CURDIR)/debian/cryptsetup-bin/lib/libcryptsetup.so.* \
-		$(CURDIR)/debian/libcryptsetup4/lib/$(DEB_HOST_MULTIARCH)/
+		$(CURDIR)/debian/libcryptsetup12/lib/$(DEB_HOST_MULTIARCH)/
 	#cp -a $(CURDIR)/debian/cryptsetup-bin/lib/libcryptsetup.la \
 	#	$(CURDIR)/debian/libcryptsetup-dev/usr/lib/$(DEB_HOST_MULTIARCH)/
 	#cp -a $(CURDIR)/debian/cryptsetup-bin/lib/libcryptsetup.a \
@@ -111,7 +112,9 @@ install-stamp: build-stamp
 		$(CURDIR)/debian/libcryptsetup-dev/usr/include/
 	#cp -a $(CURDIR)/debian/cryptsetup-bin/lib/libcryptsetup.so \
 	#	$(CURDIR)/debian/libcryptsetup-dev/usr/lib/$(DEB_HOST_MULTIARCH)/
-	dh_link -plibcryptsetup-dev lib/$(DEB_HOST_MULTIARCH)/$$(basename $$(readlink debian/libcryptsetup4/lib/$(DEB_HOST_MULTIARCH)/libcryptsetup.so.4)) usr/lib/$(DEB_HOST_MULTIARCH)/libcryptsetup.so
+	mkdir -p $(CURDIR)/debian/cryptsetup-bin/usr/lib/tmpfiles.d
+	install -m0644 ./scripts/cryptsetup.conf $(CURDIR)/debian/cryptsetup-bin/usr/lib/tmpfiles.d
+	dh_link -plibcryptsetup-dev lib/$(DEB_HOST_MULTIARCH)/$$(basename $$(readlink debian/libcryptsetup12/lib/$(DEB_HOST_MULTIARCH)/libcryptsetup.so.12)) usr/lib/$(DEB_HOST_MULTIARCH)/libcryptsetup.so
 
 	# Remove libraries from cryptsetup package, they're shiped in seperate library packages
 	rm -rf $(CURDIR)/debian/cryptsetup-bin/lib
@@ -186,16 +189,16 @@ binary-arch: build install
 	cp -a $(CURDIR)/debian/cryptsetup/lib $(CURDIR)/debian/cryptsetup-udeb/
 	mkdir $(CURDIR)/debian/cryptsetup-udeb/sbin
 	cp -a $(CURDIR)/debian/cryptsetup-bin/sbin/cryptsetup $(CURDIR)/debian/cryptsetup-udeb/sbin/
-	# Copy relevant parts to libcryptsetup4-udeb package
-	cp -a $(CURDIR)/debian/libcryptsetup4/lib $(CURDIR)/debian/libcryptsetup4-udeb/
+	# Copy relevant parts to libcryptsetup12-udeb package
+	cp -a $(CURDIR)/debian/libcryptsetup12/lib $(CURDIR)/debian/libcryptsetup12-udeb/
 	dh_lintian -a
 	dh_strip_nondeterminism
 	dh_compress -a
 	dh_fixperms -a
 	dh_strip -a
 	# Check for new/changed symbols in libcryptsetup
-	#dpkg-gensymbols -plibcryptsetup4 -Pdebian/libcryptsetup4 -Odebian/libcrypsetup4.symbols
-	dh_makeshlibs -a -V --add-udeb=libcryptsetup4-udeb
+	#dpkg-gensymbols -plibcryptsetup12 -Pdebian/libcryptsetup12 -Odebian/libcrypsetup4.symbols
+	dh_makeshlibs -a -V --add-udeb=libcryptsetup12-udeb
 	dh_shlibdeps -a
 	dh_gencontrol -a
 	dh_installdeb -a
@@ -208,8 +211,8 @@ clean:
 	dh_testdir
 	dh_testroot
 	# clean up the source directory
+	dh_autoreconf_clean
 	if test -f Makefile; then $(MAKE) distclean; fi
-	rm -f autom4te.cache
 	rm -f manifest manifest.new
 	rm -f debian/doc/*.[0-9] debian/doc/variables.xml
 	rm -f debian/luksformat.8

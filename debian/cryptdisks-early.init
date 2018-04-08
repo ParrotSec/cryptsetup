@@ -25,6 +25,9 @@ fi
 INITSTATE="early"
 DEFAULT_LOUD=""
 
+# Create LUKS2 locking directory
+install -oroot -groot -m0700 -d /run/cryptsetup
+
 case "$CRYPTDISKS_ENABLE" in
 [Nn]*)
 	exit 0

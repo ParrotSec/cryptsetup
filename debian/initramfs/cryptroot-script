@@ -62,6 +62,8 @@ parse_options()
 	# Defaults
 	cryptcipher=aes-cbc-essiv:sha256
 	cryptsize=256
+	cryptoffset=""
+	cryptskip=""
 	crypthash=ripemd160
 	crypttarget=cryptroot
 	cryptsource=""
@@ -80,6 +82,12 @@ parse_options()
 	local IFS=" ,"
 	for x in $cryptopts; do
 		case $x in
+		offset=*)
+			cryptoffset=${x#offset=}
+			;;
+		skip=*)
+			cryptskip=${x#skip=}
+			;;
 		hash=*)
 			crypthash=${x#hash=}
 			;;
@@ -284,6 +292,12 @@ setup_mapping()
 	fi
 	if [ -n "$cryptheader" ]; then
 		cryptopen="$cryptopen --header=$cryptheader"
+	fi
+	if [ -n "$cryptoffset" ]; then
+		cryptopen="$cryptopen --offset=$cryptoffset"
+	fi
+	if [ -n "$cryptskip" ]; then
+		cryptopen="$cryptopen --skip=$cryptskip"
 	fi
 	if [ -n "$cryptkeyslot" ]; then
 		cryptopen="$cryptopen --key-slot=$cryptkeyslot"

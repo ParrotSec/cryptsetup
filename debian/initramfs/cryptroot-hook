@@ -397,6 +397,12 @@ get_device_opts() {
 			cipher=*)
 				OPTIONS="$OPTIONS,$opt"
 				;;
+			offset=*)
+				OPTIONS="$OPTIONS,$opt"
+				;;
+			skip=*)
+				OPTIONS="$OPTIONS,$opt"
+				;;
 			size=*)
 				OPTIONS="$OPTIONS,$opt"
 				;;

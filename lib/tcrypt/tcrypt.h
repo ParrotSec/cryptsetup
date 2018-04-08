@@ -1,8 +1,8 @@
 /*
  * TCRYPT (TrueCrypt-compatible)  header defitinion
  *
- * Copyright (C) 2012-2017, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2017, Milan Broz
+ * Copyright (C) 2012-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2018, Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -19,10 +19,10 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "libcryptsetup.h"
-
 #ifndef _CRYPTSETUP_TCRYPT_H
 #define _CRYPTSETUP_TCRYPT_H
+
+#include <stdint.h>
 
 #define TCRYPT_HDR_SALT_LEN 64
 #define TCRYPT_HDR_IV_LEN   16
@@ -72,6 +72,8 @@ struct tcrypt_phdr {
 	};
 } __attribute__((__packed__));
 
+struct crypt_device;
+struct crypt_params_tcrypt;
 struct crypt_dm_active_device;
 struct volume_key;
 struct device;
@@ -93,7 +95,8 @@ int TCRYPT_activate(struct crypt_device *cd,
 		     uint32_t flags);
 
 int TCRYPT_deactivate(struct crypt_device *cd,
-		      const char *name);
+		      const char *name,
+		      uint32_t flags);
 
 uint64_t TCRYPT_get_data_offset(struct crypt_device *cd,
 				struct tcrypt_phdr *hdr,

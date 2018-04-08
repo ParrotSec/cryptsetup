@@ -1,8 +1,8 @@
 /*
  * loop-AES compatible volume handling
  *
- * Copyright (C) 2011-2017, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2011-2017, Milan Broz
+ * Copyright (C) 2011-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2011-2018, Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -92,7 +92,7 @@ static int hash_keys(struct crypt_device *cd,
 		return -EINVAL;
 	}
 
-	*vk = crypt_alloc_volume_key(key_len_output * keys_count, NULL);
+	*vk = crypt_alloc_volume_key((size_t)key_len_output * keys_count, NULL);
 	if (!*vk)
 		return -ENOMEM;
 
@@ -204,7 +204,7 @@ int LOOPAES_activate(struct crypt_device *cd,
 		     uint32_t flags)
 {
 	char *cipher = NULL;
-	uint32_t req_flags;
+	uint32_t req_flags, dmc_flags;
 	int r;
 	struct crypt_dm_active_device dmd = {
 		.target = DM_CRYPT,
@@ -216,6 +216,7 @@ int LOOPAES_activate(struct crypt_device *cd,
 			.vk     = vk,
 			.offset = crypt_get_data_offset(cd),
 			.iv_offset = crypt_get_iv_offset(cd),
+			.sector_size = crypt_get_sector_size(cd),
 		}
 	};
 
@@ -240,7 +241,8 @@ int LOOPAES_activate(struct crypt_device *cd,
 
 	r = dm_create_device(cd, name, CRYPT_LOOPAES, &dmd, 0);
 
-	if (r < 0 && !(dm_flags() & req_flags)) {
+	if (r < 0 && !dm_flags(DM_CRYPT, &dmc_flags) &&
+	    (dmc_flags & req_flags) != req_flags) {
 		log_err(cd, _("Kernel doesn't support loop-AES compatible mapping.\n"));
 		r = -ENOTSUP;
 	}

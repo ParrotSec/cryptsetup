@@ -1,7 +1,8 @@
 /*
  * PBKDF performance check
- * Copyright (C) 2012-2017, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2017, Milan Broz
+ * Copyright (C) 2012-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2018, Milan Broz
+ * Copyright (C) 2016-2018, Ondrej Mosnacek
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,9 +21,18 @@
 
 #include <stdlib.h>
 #include <errno.h>
+#include <limits.h>
+#include <time.h>
 #include <sys/time.h>
 #include <sys/resource.h>
 #include "crypto_backend.h"
+
+#define BENCH_MIN_MS 250
+#define BENCH_MIN_MS_FAST 10
+#define BENCH_PERCENT_ATLEAST 95
+#define BENCH_PERCENT_ATMOST 110
+#define BENCH_SAMPLES_FAST 3
+#define BENCH_SAMPLES_SLOW 1
 
 static long time_ms(struct rusage *start, struct rusage *end)
 {
@@ -51,17 +61,242 @@ static long time_ms(struct rusage *start, struct rusage *end)
 	return ms;
 }
 
+static long timespec_ms(struct timespec *start, struct timespec *end)
+{
+	return (end->tv_sec - start->tv_sec) * 1000 +
+	        (end->tv_nsec - start->tv_nsec) / (1000 * 1000);
+}
+
+static int measure_argon2(const char *kdf, const char *password, size_t password_length,
+			  const char *salt, size_t salt_length,
+			  char *key, size_t key_length,
+			  uint32_t t_cost, uint32_t m_cost, uint32_t parallel,
+			  size_t samples, long ms_atleast, long *out_ms)
+{
+	long ms, ms_min = LONG_MAX;
+	int r;
+	size_t i;
+
+	for (i = 0; i < samples; i++) {
+		struct timespec tstart, tend;
+
+		/*
+		 * NOTE: We must use clock_gettime here, because Argon2 can run over
+		 * multiple threads, and thus we care about real time, not CPU time!
+		 */
+		if (clock_gettime(CLOCK_MONOTONIC_RAW, &tstart) < 0)
+			return -EINVAL;
+
+		r = crypt_pbkdf(kdf, NULL, password, password_length, salt,
+		                salt_length, key, key_length, t_cost, m_cost, parallel);
+		if (r < 0)
+			return r;
+
+		if (clock_gettime(CLOCK_MONOTONIC_RAW, &tend) < 0)
+			return -EINVAL;
+
+		ms = timespec_ms(&tstart, &tend);
+		if (ms < 0)
+			return -EINVAL;
+
+		if (ms < ms_atleast) {
+			/* early exit */
+			ms_min = ms;
+			break;
+		}
+		if (ms < ms_min) {
+			ms_min = ms;
+		}
+	}
+	*out_ms = ms_min;
+	return 0;
+}
+
+#define CONTINUE 0
+#define FINAL   1
+static int next_argon2_params(uint32_t *t_cost, uint32_t *m_cost,
+			      uint32_t min_t_cost, uint32_t min_m_cost,
+			      uint32_t max_m_cost, long ms, uint32_t target_ms)
+{
+	uint32_t old_t_cost, old_m_cost, new_t_cost, new_m_cost;
+	uint64_t num, denom;
+
+	old_t_cost = *t_cost;
+	old_m_cost = *m_cost;
+
+	if (ms > target_ms) {
+		/* decreasing, first try to lower t_cost, then m_cost */
+		num = (uint64_t)*t_cost * (uint64_t)target_ms;
+		denom = (uint64_t)ms;
+		new_t_cost = (uint32_t)(num / denom);
+		if (new_t_cost < min_t_cost) {
+			num = (uint64_t)*t_cost * (uint64_t)*m_cost *
+			      (uint64_t)target_ms;
+			denom = (uint64_t)min_t_cost * (uint64_t)ms;
+			*t_cost = min_t_cost;
+			*m_cost = (uint32_t)(num / denom);
+			if (*m_cost < min_m_cost) {
+				*m_cost = min_m_cost;
+				return FINAL;
+			}
+		} else {
+			*t_cost = new_t_cost;
+		}
+	} else {
+		/* increasing, first try to increase m_cost, then t_cost */
+		num = (uint64_t)*m_cost * (uint64_t)target_ms;
+		denom = (uint64_t)ms;
+		new_m_cost = (uint32_t)(num / denom);
+		if (new_m_cost > max_m_cost) {
+			num = (uint64_t)*t_cost * (uint64_t)*m_cost *
+			      (uint64_t)target_ms;
+			denom = (uint64_t)max_m_cost * (uint64_t)ms;
+			*t_cost = (uint32_t)(num / denom);
+			*m_cost = max_m_cost;
+			if (*t_cost <= min_t_cost) {
+				*t_cost = min_t_cost;
+				return FINAL;
+			}
+		} else if (new_m_cost < min_m_cost) {
+			*m_cost = min_m_cost;
+			return FINAL;
+		} else {
+			*m_cost = new_m_cost;
+		}
+	}
+
+	/* do not continue if it is the same as in the previous run */
+	if (old_t_cost == *t_cost && old_m_cost == *m_cost)
+		return FINAL;
+
+	return CONTINUE;
+}
+
+static int crypt_argon2_check(const char *kdf, const char *password,
+			      size_t password_length, const char *salt,
+			      size_t salt_length, size_t key_length,
+			      uint32_t min_t_cost, uint32_t max_m_cost,
+			      uint32_t parallel, uint32_t target_ms,
+			      uint32_t *out_t_cost, uint32_t *out_m_cost,
+			      int (*progress)(uint32_t time_ms, void *usrptr),
+			      void *usrptr)
+{
+	int r = 0;
+	char *key = NULL;
+	uint32_t t_cost, m_cost, min_m_cost = 8 * parallel;
+	long ms;
+	long ms_atleast = (long)target_ms * BENCH_PERCENT_ATLEAST / 100;
+	long ms_atmost = (long)target_ms * BENCH_PERCENT_ATMOST / 100;
+
+	if (key_length <= 0 || target_ms <= 0)
+		return -EINVAL;
+
+	if (max_m_cost < min_m_cost)
+		return -EINVAL;
+
+	key = malloc(key_length);
+	if (!key)
+		return -ENOMEM;
+
+	t_cost = min_t_cost;
+	m_cost = min_m_cost;
+
+	/* 1. Find some small parameters, s. t. ms >= BENCH_MIN_MS: */
+	while (1) {
+		r = measure_argon2(kdf, password, password_length, salt, salt_length,
+		                   key, key_length, t_cost, m_cost, parallel,
+		                   BENCH_SAMPLES_FAST, BENCH_MIN_MS, &ms);
+		if (!r) {
+			/* Update parameters to actual measurement */
+			*out_t_cost = t_cost;
+			*out_m_cost = m_cost;
+			if (progress && progress((uint32_t)ms, usrptr))
+				r = -EINTR;
+		}
+
+		if (r < 0)
+			goto out;
+
+		if (ms >= BENCH_MIN_MS)
+			break;
+
+		if (m_cost == max_m_cost) {
+			if (ms < BENCH_MIN_MS_FAST)
+				t_cost *= 16;
+			else {
+				uint32_t new = (t_cost * BENCH_MIN_MS) / (uint32_t)ms;
+				if (new == t_cost)
+					break;
+
+				t_cost = new;
+			}
+		} else {
+			if (ms < BENCH_MIN_MS_FAST)
+				m_cost *= 16;
+			else {
+				uint32_t new = (m_cost * BENCH_MIN_MS) / (uint32_t)ms;
+				if (new == m_cost)
+					break;
+
+				m_cost = new;
+			}
+			if (m_cost > max_m_cost) {
+				m_cost = max_m_cost;
+			}
+		}
+	}
+	/*
+	 * 2. Use the params obtained in (1.) to estimate the target params.
+	 * 3. Then repeatedly measure the candidate params and if they fall out of
+	 * the acceptance range (+-5 %), try to improve the estimate:
+	 */
+	do {
+		if (next_argon2_params(&t_cost, &m_cost, min_t_cost, min_m_cost,
+				       max_m_cost, ms, target_ms)) {
+			/* Update parameters to final computation */
+			*out_t_cost = t_cost;
+			*out_m_cost = m_cost;
+			break;
+		}
+
+		r = measure_argon2(kdf, password, password_length, salt, salt_length,
+		                   key, key_length, t_cost, m_cost, parallel,
+		                   BENCH_SAMPLES_SLOW, ms_atleast, &ms);
+
+		if (!r) {
+			/* Update parameters to actual measurement */
+			*out_t_cost = t_cost;
+			*out_m_cost = m_cost;
+			if (progress && progress((uint32_t)ms, usrptr))
+				r = -EINTR;
+		}
+
+		if (r < 0)
+			break;
+
+	} while (ms < ms_atleast || ms > ms_atmost);
+out:
+	if (key) {
+		crypt_backend_memzero(key, key_length);
+		free(key);
+	}
+	return r;
+}
+
 /* This code benchmarks PBKDF and returns iterations/second using specified hash */
-int crypt_pbkdf_check(const char *kdf, const char *hash,
+static int crypt_pbkdf_check(const char *kdf, const char *hash,
 		      const char *password, size_t password_length,
 		      const char *salt, size_t salt_length,
-		      size_t key_length, uint64_t *iter_secs)
+		      size_t key_length, uint32_t *iter_secs, uint32_t target_ms,
+		      int (*progress)(uint32_t time_ms, void *usrptr), void *usrptr)
+
 {
 	struct rusage rstart, rend;
 	int r = 0, step = 0;
 	long ms = 0;
 	char *key = NULL;
-	unsigned int iterations;
+	uint32_t iterations;
+	double PBKDF2_temp;
 
 	if (!kdf || !hash || key_length <= 0)
 		return -EINVAL;
@@ -70,6 +305,7 @@ int crypt_pbkdf_check(const char *kdf, const char *hash,
 	if (!key)
 		return -ENOMEM;
 
+	*iter_secs = 0;
 	iterations = 1 << 15;
 	while (1) {
 		if (getrusage(RUSAGE_SELF, &rstart) < 0) {
@@ -78,7 +314,8 @@ int crypt_pbkdf_check(const char *kdf, const char *hash,
 		}
 
 		r = crypt_pbkdf(kdf, hash, password, password_length, salt,
-				salt_length, key, key_length, iterations);
+				salt_length, key, key_length, iterations, 0, 0);
+
 		if (r < 0)
 			goto out;
 
@@ -88,6 +325,18 @@ int crypt_pbkdf_check(const char *kdf, const char *hash,
 		}
 
 		ms = time_ms(&rstart, &rend);
+		if (ms) {
+			PBKDF2_temp = (double)iterations * target_ms / ms;
+			if (PBKDF2_temp > UINT32_MAX)
+				return -EINVAL;
+			*iter_secs = (uint32_t)PBKDF2_temp;
+		}
+
+		if (progress && progress((uint32_t)ms, usrptr)) {
+			r = -EINTR;
+			goto out;
+		}
+
 		if (ms > 500)
 			break;
 
@@ -105,13 +354,42 @@ int crypt_pbkdf_check(const char *kdf, const char *hash,
 			goto out;
 		}
 	}
-
-	if (iter_secs)
-		*iter_secs = (iterations * 1000) / ms;
 out:
 	if (key) {
 		crypt_backend_memzero(key, key_length);
 		free(key);
 	}
+	return r;
+}
+
+#define ARGON2_MIN_T_COST 4
+
+int crypt_pbkdf_perf(const char *kdf, const char *hash,
+		const char *password, size_t password_size,
+		const char *salt, size_t salt_size,
+		size_t volume_key_size, uint32_t time_ms,
+		uint32_t max_memory_kb, uint32_t parallel_threads,
+		uint32_t *iterations_out, uint32_t *memory_out,
+		int (*progress)(uint32_t time_ms, void *usrptr), void *usrptr)
+{
+	int r = -EINVAL;
+
+	if (!kdf || !iterations_out || !memory_out)
+		return -EINVAL;
+
+	*memory_out = 0;
+	*iterations_out = 0;
+
+	if (!strcmp(kdf, "pbkdf2"))
+		r = crypt_pbkdf_check(kdf, hash, password, password_size,
+				      salt, salt_size, volume_key_size,
+				      iterations_out, time_ms, progress, usrptr);
+
+	else if (!strncmp(kdf, "argon2", 6))
+		r = crypt_argon2_check(kdf, password, password_size,
+				       salt, salt_size, volume_key_size,
+				       ARGON2_MIN_T_COST, max_memory_kb,
+				       parallel_threads, time_ms, iterations_out,
+				       memory_out, progress, usrptr);
 	return r;
 }

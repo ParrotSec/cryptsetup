@@ -2,8 +2,8 @@
  * utils_crypt - cipher utilities for cryptsetup
  *
  * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2017, Milan Broz
+ * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2018, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -31,15 +31,18 @@
 
 struct crypt_device;
 
+/* Not to be used directly */
+struct safe_allocation {
+	size_t	size;
+	char	data[0];
+};
+
 int crypt_parse_name_and_mode(const char *s, char *cipher,
 			      int *key_nums, char *cipher_mode);
-
-int crypt_get_key(const char *prompt,
-		  char **key, size_t *key_size,
-		  size_t keyfile_offset, size_t keyfile_size_max,
-		  const char *key_file,
-		  int timeout, int verify,
-		  struct crypt_device *cd);
+int crypt_parse_hash_integrity_mode(const char *s, char *integrity);
+int crypt_parse_integrity_mode(const char *s, char *integrity,
+			       int *integrity_key_size);
+int crypt_parse_pbkdf(const char *s, const char **pbkdf);
 
 void *crypt_safe_alloc(size_t size);
 void crypt_safe_free(void *data);
