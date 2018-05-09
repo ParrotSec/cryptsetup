@@ -213,12 +213,11 @@ int crypt_hash_final(struct crypt_hash *ctx, char *buffer, size_t length)
 	return 0;
 }
 
-int crypt_hash_destroy(struct crypt_hash *ctx)
+void crypt_hash_destroy(struct crypt_hash *ctx)
 {
 	EVP_MD_CTX_free(ctx->md);
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 /* HMAC */
@@ -228,7 +227,7 @@ int crypt_hmac_size(const char *name)
 }
 
 int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
-		    const void *buffer, size_t length)
+		    const void *key, size_t key_length)
 {
 	struct crypt_hmac *h;
 
@@ -249,7 +248,7 @@ int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
 		return -EINVAL;
 	}
 
-	HMAC_Init_ex(h->md, buffer, length, h->hash_id, NULL);
+	HMAC_Init_ex(h->md, key, key_length, h->hash_id, NULL);
 
 	h->hash_len = EVP_MD_size(h->hash_id);
 	*ctx = h;
@@ -288,12 +287,11 @@ int crypt_hmac_final(struct crypt_hmac *ctx, char *buffer, size_t length)
 	return 0;
 }
 
-int crypt_hmac_destroy(struct crypt_hmac *ctx)
+void crypt_hmac_destroy(struct crypt_hmac *ctx)
 {
 	HMAC_CTX_free(ctx->md);
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 /* RNG */

@@ -132,6 +132,7 @@ int LUKS2_token_create(struct crypt_device *cd,
 	int commit)
 {
 	const crypt_token_handler *h;
+	const token_handler *th;
 	json_object *jobj_tokens, *jobj_type, *jobj;
 	enum json_tokener_error jerr;
 	char num[16];
@@ -169,12 +170,16 @@ int LUKS2_token_create(struct crypt_device *cd,
 
 		json_object_object_get_ex(jobj, "type", &jobj_type);
 		if (is_builtin_candidate(json_object_get_string(jobj_type))) {
-			log_dbg("%s is builtin token candidate", json_object_get_string(jobj_type));
-			json_object_put(jobj);
-			return -EINVAL;
-		}
+			th = LUKS2_token_handler_type_internal(cd, json_object_get_string(jobj_type));
+			if (!th || !th->set) {
+				log_dbg("%s is builtin token candidate with missing handler", json_object_get_string(jobj_type));
+				json_object_put(jobj);
+				return -EINVAL;
+			}
+			h = th->h;
+		} else
+			h = LUKS2_token_handler_type(cd, json_object_get_string(jobj_type));
 
-		h = LUKS2_token_handler_type(cd, json_object_get_string(jobj_type));
 		if (h && h->validate && h->validate(cd, json)) {
 			json_object_put(jobj);
 			return -EINVAL;
@@ -345,7 +350,7 @@ static int LUKS2_keyslot_open_by_token(struct crypt_device *cd,
 {
 	const crypt_token_handler *h;
 	json_object *jobj_token, *jobj_token_keyslots, *jobj;
-	const char *num;
+	const char *num = NULL;
 	int i, r;
 
 	if (!(h = LUKS2_token_handler(cd, token)))
@@ -368,7 +373,10 @@ static int LUKS2_keyslot_open_by_token(struct crypt_device *cd,
 		r = LUKS2_keyslot_open(cd, atoi(num), segment, buffer, buffer_len, vk);
 	}
 
-	return r < 0 ? r : atoi(num);
+	if (r >= 0 && num)
+		return atoi(num);
+
+	return r;
 }
 
 int LUKS2_token_open_and_activate(struct crypt_device *cd,
@@ -398,16 +406,14 @@ int LUKS2_token_open_and_activate(struct crypt_device *cd,
 
 	keyslot = r;
 
-	if ((name || (flags & CRYPT_ACTIVATE_KEYRING_KEY)) && crypt_use_keyring_for_vk(cd)) {
-		crypt_volume_key_set_description(vk, crypt_get_key_description_by_keyslot(cd, keyslot));
-		r = crypt_volume_key_load_in_keyring(cd, vk);
-	}
+	if ((name || (flags & CRYPT_ACTIVATE_KEYRING_KEY)) && crypt_use_keyring_for_vk(cd))
+		r = LUKS2_volume_key_load_in_keyring_by_keyslot(cd, hdr, vk, keyslot);
 
 	if (r >= 0 && name)
 		r = LUKS2_activate(cd, name, vk, flags);
 
-	if (r < 0)
-		crypt_drop_keyring_key(cd, crypt_volume_key_get_description(vk));
+	if (r < 0 && vk)
+		crypt_drop_keyring_key(cd, vk->key_description);
 	crypt_free_volume_key(vk);
 
 	return r < 0 ? r : keyslot;
@@ -444,16 +450,14 @@ int LUKS2_token_open_and_activate_any(struct crypt_device *cd,
 
 	keyslot = r;
 
-	if (r >= 0 && (name || (flags & CRYPT_ACTIVATE_KEYRING_KEY)) && crypt_use_keyring_for_vk(cd)) {
-		crypt_volume_key_set_description(vk, crypt_get_key_description_by_keyslot(cd, keyslot));
-		r = crypt_volume_key_load_in_keyring(cd, vk);
-	}
+	if (r >= 0 && (name || (flags & CRYPT_ACTIVATE_KEYRING_KEY)) && crypt_use_keyring_for_vk(cd))
+		r = LUKS2_volume_key_load_in_keyring_by_keyslot(cd, hdr, vk, keyslot);
 
 	if (r >= 0 && name)
 		r = LUKS2_activate(cd, name, vk, flags);
 
-	if (r < 0)
-		crypt_drop_keyring_key(cd, crypt_volume_key_get_description(vk));
+	if (r < 0 && vk)
+		crypt_drop_keyring_key(cd, vk->key_description);
 	crypt_free_volume_key(vk);
 
 	return r < 0 ? r : keyslot;
@@ -565,4 +569,28 @@ int LUKS2_token_assign(struct crypt_device *cd, struct luks2_hdr *hdr,
 		return LUKS2_hdr_write(cd, hdr) ?: token;
 
 	return token;
+}
+
+int LUKS2_token_is_assigned(struct crypt_device *cd, struct luks2_hdr *hdr,
+			    int keyslot, int token)
+{
+	int i;
+	json_object *jobj_token, *jobj_token_keyslots, *jobj;
+
+	if (keyslot < 0 || keyslot >= LUKS2_KEYSLOTS_MAX || token < 0 || token >= LUKS2_TOKENS_MAX)
+		return -EINVAL;
+
+	jobj_token = LUKS2_get_token_jobj(hdr, token);
+	if (!jobj_token)
+		return -ENOENT;
+
+	json_object_object_get_ex(jobj_token, "keyslots", &jobj_token_keyslots);
+
+	for (i = 0; i < (int) json_object_array_length(jobj_token_keyslots); i++) {
+		jobj = json_object_array_get_idx(jobj_token_keyslots, i);
+		if (keyslot == atoi(json_object_get_string(jobj)))
+			return 0;
+	}
+
+	return -ENOENT;
 }

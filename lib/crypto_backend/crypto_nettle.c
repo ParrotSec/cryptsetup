@@ -202,11 +202,10 @@ int crypt_hash_final(struct crypt_hash *ctx, char *buffer, size_t length)
 	return 0;
 }
 
-int crypt_hash_destroy(struct crypt_hash *ctx)
+void crypt_hash_destroy(struct crypt_hash *ctx)
 {
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 /* HMAC */
@@ -216,7 +215,7 @@ int crypt_hmac_size(const char *name)
 }
 
 int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
-		    const void *buffer, size_t length)
+		    const void *key, size_t key_length)
 {
 	struct crypt_hmac *h;
 
@@ -230,12 +229,12 @@ int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
 	if (!h->hash)
 		goto bad;
 
-	h->key = malloc(length);
+	h->key = malloc(key_length);
 	if (!h->key)
 		goto bad;
 
-	memcpy(h->key, buffer, length);
-	h->key_length = length;
+	memcpy(h->key, key, key_length);
+	h->key_length = key_length;
 
 	h->hash->init(&h->nettle_ctx);
 	h->hash->hmac_set_key(&h->nettle_ctx, h->key_length, h->key);
@@ -268,13 +267,12 @@ int crypt_hmac_final(struct crypt_hmac *ctx, char *buffer, size_t length)
 	return 0;
 }
 
-int crypt_hmac_destroy(struct crypt_hmac *ctx)
+void crypt_hmac_destroy(struct crypt_hmac *ctx)
 {
 	memset(ctx->key, 0, ctx->key_length);
 	free(ctx->key);
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 /* RNG - N/A */

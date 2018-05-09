@@ -180,12 +180,11 @@ int crypt_hash_final(struct crypt_hash *ctx, char *buffer, size_t length)
 	return 0;
 }
 
-int crypt_hash_destroy(struct crypt_hash *ctx)
+void crypt_hash_destroy(struct crypt_hash *ctx)
 {
 	PK11_DestroyContext(ctx->md, PR_TRUE);
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 /* HMAC */
@@ -195,15 +194,15 @@ int crypt_hmac_size(const char *name)
 }
 
 int crypt_hmac_init(struct crypt_hmac **ctx, const char *name,
-		    const void *buffer, size_t length)
+		    const void *key, size_t key_length)
 {
 	struct crypt_hmac *h;
 	SECItem keyItem;
 	SECItem noParams;
 
 	keyItem.type = siBuffer;
-	keyItem.data = CONST_CAST(unsigned char *)buffer;
-	keyItem.len = (int)length;
+	keyItem.data = CONST_CAST(unsigned char *)key;
+	keyItem.len = (int)key_length;
 
 	noParams.type = siBuffer;
 	noParams.data = 0;
@@ -282,7 +281,7 @@ int crypt_hmac_final(struct crypt_hmac *ctx, char *buffer, size_t length)
 	return 0;
 }
 
-int crypt_hmac_destroy(struct crypt_hmac *ctx)
+void crypt_hmac_destroy(struct crypt_hmac *ctx)
 {
 	if (ctx->key)
 		PK11_FreeSymKey(ctx->key);
@@ -292,7 +291,6 @@ int crypt_hmac_destroy(struct crypt_hmac *ctx)
 		PK11_DestroyContext(ctx->md, PR_TRUE);
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 /* RNG */

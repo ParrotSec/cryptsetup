@@ -56,7 +56,7 @@ static int int_log2(unsigned int x)
 
 static int crypt_sector_iv_init(struct crypt_sector_iv *ctx,
 			 const char *cipher_name, const char *mode_name,
-			 const char *iv_name, char *key, size_t key_length)
+			 const char *iv_name, const void *key, size_t key_length)
 {
 	memset(ctx, 0, sizeof(*ctx));
 
@@ -178,7 +178,7 @@ static int crypt_sector_iv_generate(struct crypt_sector_iv *ctx, uint64_t sector
 	return 0;
 }
 
-static int crypt_sector_iv_destroy(struct crypt_sector_iv *ctx)
+static void crypt_sector_iv_destroy(struct crypt_sector_iv *ctx)
 {
 	if (ctx->type == IV_ESSIV)
 		crypt_cipher_destroy(ctx->essiv_cipher);
@@ -189,7 +189,6 @@ static int crypt_sector_iv_destroy(struct crypt_sector_iv *ctx)
 	}
 
 	memset(ctx, 0, sizeof(*ctx));
-	return 0;
 }
 
 /* Block encryption storage wrappers */
@@ -198,7 +197,7 @@ int crypt_storage_init(struct crypt_storage **ctx,
 		       uint64_t sector_start,
 		       const char *cipher,
 		       const char *cipher_mode,
-		       char *key, size_t key_length)
+		       const void *key, size_t key_length)
 {
 	struct crypt_storage *s;
 	char mode_name[64];
@@ -285,10 +284,10 @@ int crypt_storage_encrypt(struct crypt_storage *ctx,
 	return r;
 }
 
-int crypt_storage_destroy(struct crypt_storage *ctx)
+void crypt_storage_destroy(struct crypt_storage *ctx)
 {
 	if (!ctx)
-		return 0;
+		return;
 
 	crypt_sector_iv_destroy(&ctx->cipher_iv);
 
@@ -297,6 +296,4 @@ int crypt_storage_destroy(struct crypt_storage *ctx)
 
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-
-	return 0;
 }

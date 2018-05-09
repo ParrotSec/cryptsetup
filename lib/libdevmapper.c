@@ -457,7 +457,7 @@ static int cipher_c2dm(const char *org_c, const char *org_i, unsigned tag_size,
 static int cipher_dm2c(char **org_c, char **org_i, const char *c_dm, const char *i_dm)
 {
 	char cipher[CLEN], mode[CLEN], iv[CLEN], auth[CLEN];
-	char tmp[CAPIL], capi[CAPIL];
+	char tmp[CAPIL*2], capi[CAPIL];
 	size_t len;
 	int i;
 
@@ -523,7 +523,7 @@ static char *get_dm_crypt_params(struct crypt_dm_active_device *dmd, uint32_t fl
 {
 	int r, max_size, null_cipher = 0, num_options = 0, keystr_len = 0;
 	char *params, *hexkey;
-	char sector_feature[32], features[256], integrity_dm[256], cipher_dm[256];
+	char sector_feature[32], features[512], integrity_dm[256], cipher_dm[256];
 
 	if (!dmd)
 		return NULL;
@@ -1163,6 +1163,14 @@ static int check_retry(uint32_t *dmd_flags, uint32_t dmt_flags)
 		ret = 1;
 	}
 
+	/* Drop performance options if not supported */
+	if ((*dmd_flags & (CRYPT_ACTIVATE_SAME_CPU_CRYPT | CRYPT_ACTIVATE_SUBMIT_FROM_CRYPT_CPUS)) &&
+	    !(dmt_flags & (DM_SAME_CPU_CRYPT_SUPPORTED | DM_SUBMIT_FROM_CRYPT_CPUS_SUPPORTED))) {
+		log_dbg("dm-crypt doesn't support performance options");
+		*dmd_flags = *dmd_flags & ~(CRYPT_ACTIVATE_SAME_CPU_CRYPT | CRYPT_ACTIVATE_SUBMIT_FROM_CRYPT_CPUS);
+		ret = 1;
+	}
+
 	return ret;
 }
 
@@ -1482,7 +1490,7 @@ static int _dm_query_crypt(uint32_t get_flags,
 
 		if (get_flags & DM_ACTIVE_CRYPT_KEY) {
 			if (key_[0] == ':') {
-				key_desc = strdup(strpbrk(strpbrk(key_ + 1, ":") + 1, ":") + 1);
+				key_desc = strpbrk(strpbrk(key_ + 1, ":") + 1, ":") + 1;
 				if (!key_desc) {
 					r = -ENOMEM;
 					goto err;
