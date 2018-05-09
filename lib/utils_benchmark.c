@@ -1,8 +1,8 @@
 /*
- * libcryptsetup - cryptsetup library, cipher bechmark
+ * libcryptsetup - cryptsetup library, cipher benchmark
  *
- * Copyright (C) 2012-2017, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2017, Milan Broz
+ * Copyright (C) 2012-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2018, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -197,7 +197,7 @@ int crypt_benchmark(struct crypt_device *cd,
 	char *c;
 	int r;
 
-	if (!cipher || !cipher_mode || !volume_key_size)
+	if (!cipher || !cipher_mode || !volume_key_size || !encryption_mbs || !decryption_mbs)
 		return -EINVAL;
 
 	r = init_crypto(cd);
@@ -231,39 +231,109 @@ out:
 	return r;
 }
 
-int crypt_benchmark_kdf(struct crypt_device *cd,
-	const char *kdf,
-	const char *hash,
+int crypt_benchmark_pbkdf(struct crypt_device *cd,
+	struct crypt_pbkdf_type *pbkdf,
 	const char *password,
 	size_t password_size,
 	const char *salt,
 	size_t salt_size,
-	uint64_t *iterations_sec)
+	size_t volume_key_size,
+	int (*progress)(uint32_t time_ms, void *usrptr),
+	void *usrptr)
 {
-	int r, key_length = 0;
+	int r;
+	const char *kdf_opt;
 
-	if (!iterations_sec)
+	if (!pbkdf || (!password && password_size))
 		return -EINVAL;
 
 	r = init_crypto(cd);
 	if (r < 0)
 		return r;
 
-	// FIXME: this should be in KDF check API parameters later
-	if (cd)
-		key_length = crypt_get_volume_key_size(cd);
+	kdf_opt = !strcmp(pbkdf->type, CRYPT_KDF_PBKDF2) ? pbkdf->hash : "";
 
-	if (key_length == 0)
-		key_length = DEFAULT_LUKS1_KEYBITS / 8;
+	log_dbg("Running %s(%s) benchmark.", pbkdf->type, kdf_opt);
 
-	if (!strncmp(kdf, "pbkdf2", 6))
-		r = crypt_pbkdf_check(kdf, hash, password, password_size,
-				      salt, salt_size, key_length, iterations_sec);
-	else
-		r = -EINVAL;
+	r = crypt_pbkdf_perf(pbkdf->type, pbkdf->hash, password, password_size,
+			     salt, salt_size, volume_key_size, pbkdf->time_ms,
+			     pbkdf->max_memory_kb, pbkdf->parallel_threads,
+			     &pbkdf->iterations, &pbkdf->max_memory_kb, progress, usrptr);
 
 	if (!r)
-		log_dbg("KDF %s, hash %s: %" PRIu64 " iterations per second (%d-bits key).",
-			kdf, hash, *iterations_sec, key_length * 8);
+		log_dbg("Benchmark returns %s(%s) %u iterations, %u memory, %u threads (for %zu-bits key).",
+			pbkdf->type, kdf_opt, pbkdf->iterations, pbkdf->max_memory_kb,
+			pbkdf->parallel_threads, volume_key_size * 8);
+	return r;
+}
+
+static int benchmark_callback(uint32_t time_ms, void *usrptr)
+{
+	struct crypt_pbkdf_type *pbkdf = usrptr;
+
+	log_dbg("PBKDF benchmark: memory cost = %u, iterations = %u, "
+		"threads = %u (took %u ms)", pbkdf->max_memory_kb,
+		pbkdf->iterations, pbkdf->parallel_threads, time_ms);
+
+	return 0;
+}
+
+/*
+ * Used in internal places to benchmark crypt_device context PBKDF.
+ * Once requested parameters are benchmarked, iterations attribute is set,
+ * and the benchmarked values can be reused.
+ * Note that memory cost can be changed after benchmark (if used).
+ * NOTE: You need to check that you are benchmarking for the same key size.
+ */
+int crypt_benchmark_pbkdf_internal(struct crypt_device *cd,
+				   struct crypt_pbkdf_type *pbkdf,
+				   size_t volume_key_size)
+{
+	double PBKDF2_tmp;
+	uint32_t ms_tmp;
+	int r = -EINVAL;
+
+	/* Already benchmarked */
+	if (pbkdf->iterations) {
+		log_dbg("Reusing PBKDF values.");
+		return 0;
+	}
+
+	if (pbkdf->flags & CRYPT_PBKDF_NO_BENCHMARK) {
+		log_err(cd, _("PBKDF benchmark disabled but iterations not set.\n"));
+		return -EINVAL;
+	}
+
+	if (!strcmp(pbkdf->type, CRYPT_KDF_PBKDF2)) {
+		/*
+		 * For PBKDF2 it is enough to run benchmark for only 1 second
+		 * and interpolate final iterations value from it.
+		 */
+		ms_tmp = pbkdf->time_ms;
+		pbkdf->time_ms = 1000;
+		pbkdf->parallel_threads = 0; /* N/A in PBKDF2 */
+		pbkdf->max_memory_kb = 0; /* N/A in PBKDF2 */
+
+		r = crypt_benchmark_pbkdf(cd, pbkdf, "foo", 3, "bar", 3,
+					volume_key_size, &benchmark_callback, pbkdf);
+		pbkdf->time_ms = ms_tmp;
+		if (r < 0) {
+			log_err(cd, _("Not compatible PBKDF2 options (using hash algorithm %s).\n"),
+				pbkdf->hash);
+			return r;
+		}
+
+		PBKDF2_tmp = ((double)pbkdf->iterations * pbkdf->time_ms / 1000.);
+		if (PBKDF2_tmp > (double)UINT32_MAX)
+			return -EINVAL;
+		pbkdf->iterations = at_least((uint32_t)PBKDF2_tmp, MIN_PBKDF2_ITERATIONS);
+	} else {
+		r = crypt_benchmark_pbkdf(cd, pbkdf, "foo", 3,
+			"0123456789abcdef0123456789abcdef", 32,
+			volume_key_size, &benchmark_callback, pbkdf);
+		if (r < 0)
+			log_err(cd, _("Not compatible PBKDF options.\n"));
+	}
+
 	return r;
 }

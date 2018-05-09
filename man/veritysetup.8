@@ -1,4 +1,4 @@
-.TH VERITYSETUP "8" "March 2017" "veritysetup" "Maintenance Commands"
+.TH VERITYSETUP "8" "January 2018" "veritysetup" "Maintenance Commands"
 .SH NAME
 veritysetup - manage dm-verity (block level verification) volumes
 .SH SYNOPSIS
@@ -30,6 +30,7 @@ If hash device path doesn't exist, it will be created as file.
 \-\-data-block-size, \-\-hash-block-size, \-\-data-blocks, \-\-hash-offset,
 \-\-salt, \-\-uuid]
 .PP
+\fIopen\fR <data_device> <name> <hash_device> <root_hash>
 \fIcreate\fR <name> <data_device> <hash_device> <root_hash>
 .IP
 Creates a mapping with <name> backed by device <data_device> and using
@@ -56,9 +57,12 @@ The <root_hash> is a hexadecimal string.
 If option \-\-no-superblock is used, you have to use as the same options
 as in initial format operation.
 .PP
-\fIremove\fR <name>
+\fIclose\fR <name>
 .IP
 Removes existing mapping <name>.
+
+For backward compatibility there is \fBremove\fR command alias
+for \fBclose\fR command.
 .PP
 \fIstatus\fR <name>
 .IP
@@ -116,7 +120,7 @@ Defines what to do if data integrity problem is detected (data corruption).
 
 Without these options kernel fails the IO operation with I/O error.
 With \-\-ignore-corruption option the corruption is only logged.
-With \-\-restart-on-corruption the kernel is restarted immediatelly.
+With \-\-restart-on-corruption the kernel is restarted immediately.
 (You have to provide way how to avoid restart loops.)
 
 \fBWARNING:\fR Use these options only for very specific cases.
@@ -134,6 +138,23 @@ Hash algorithm for dm-verity. For default see \-\-help option.
 .TP
 .B "\-\-version"
 Show the program version.
+.TP
+.B "\-\-fec-device=fec_device"
+Use forward error correction (FEC) to recover from corruption if hash verification fails.
+Use encoding data from the specified device.
+
+The fec device argument can be block device or file image.
+For format, if fec device path doesn't exist, it will be created as file.
+
+Note: block sizes for data and hash devices must match. Also, if the verity data_device is encrypted the fec_device should be too.
+.TP
+.B "\-\-fec-offset=bytes"
+This is the offset, in bytes, from the start of the FEC device to the beginning of the encoding data.
+.TP
+.B "\-\-fec-roots=num"
+Number of generator roots. This equals to the number of parity bytes in the encoding data.
+In RS(M, N) encoding, the number of roots is M-N. M is 255 and M-N is between 2 and 24 (including).
+.TP
 .SH RETURN CODES
 Veritysetup returns 0 on success and a non-zero value on error.
 
@@ -161,12 +182,16 @@ Hash-offset must be greater than number of blocks in data-area.
 
 .B "veritysetup \-\-data-blocks=256 \-\-hash-offset=1052672 create test-device <device> <device> <root_hash>"
 
-Acivatees the verity device named test-device. Options \-\-data-blocks and \-\-hash-offset are the same
+Activates the verity device named test-device. Options \-\-data-blocks and \-\-hash-offset are the same
 as in the format command. The <root_hash> was calculated in format command.
 
 .B "veritysetup \-\-data-blocks=256 \-\-hash-offset=1052672 verify <data_device> <hash_device> <root_hash>"
 
 Verifies device without activation (in userspace).
+
+.B "veritysetup \-\-fec-device=<fec_device> \-\-fec-roots=10 format <data_device> <hash_device>"
+
+Calculates and stores verification and encoding data for data_device.
 
 .SH REPORTING BUGS
 Report bugs, including ones in the documentation, on
@@ -180,9 +205,9 @@ The first implementation of veritysetup was written by Chrome OS authors.
 This version is based on verification code written by Mikulas Patocka <mpatocka@redhat.com>
 and rewritten for libcryptsetup by Milan Broz <gmazyland@gmail.com>.
 .SH COPYRIGHT
-Copyright \(co 2012-2017 Red Hat, Inc.
+Copyright \(co 2012-2018 Red Hat, Inc.
 .br
-Copyright \(co 2012-2017 Milan Broz
+Copyright \(co 2012-2018 Milan Broz
 
 This is free software; see the source for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.

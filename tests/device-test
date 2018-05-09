@@ -1,10 +1,11 @@
 #!/bin/bash
 
-CRYPTSETUP="../src/cryptsetup"
+CRYPTSETUP="../cryptsetup"
 MNT_DIR="./mnt_luks"
 DEV_NAME="dummy"
 PWD1="93R4P4pIqAH8"
 PWD2="mymJeD8ivEhE"
+FAST_PBKDF_OPT="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
 
 cleanup() {
 	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove $DEV_NAME
@@ -27,14 +28,14 @@ skip()
 {
 	echo "TEST SKIPPED: $1"
 	cleanup
-	exit 0
+	exit 77
 }
 
-format() # key_bits expected [forced]
+format() # format
 {
 	dd if=/dev/zero of=$DEV bs=1M count=5 >/dev/null 2>&1
 
-	echo $PWD1 | $CRYPTSETUP luksFormat $DEV -q -i1 -c aes-cbc-essiv:sha256
+	echo $PWD1 | $CRYPTSETUP luksFormat --type $1 $DEV -q  $FAST_PBKDF_OPT -c aes-cbc-essiv:sha256
 	[ $? -ne 0 ] && fail "Format failed."
 
 	# test some operation, just in case
@@ -43,6 +44,14 @@ format() # key_bits expected [forced]
 
 	$CRYPTSETUP -q luksKillSlot $DEV 1
 	[ $? -ne 0 ] && fail "Keyslot removal failed."
+}
+
+check_sector_size() # $1 expected sector size
+{
+	$CRYPTSETUP status $DEV_NAME | grep "sector size" | grep -q $1 || fail
+	if [ $S -gt 512 ]; then
+		dmsetup table $DEV_NAME | grep -q "sector_size:$1" || fail
+	fi
 }
 
 if [ $(id -u) != 0 ]; then
@@ -55,9 +64,9 @@ fi
 echo "[1] Using tmpfs for image"
 DEV="$MNT_DIR/test.img"
 mount -t tmpfs none $MNT_DIR || skip "Mounting tmpfs not available."
-format
+format luks1
 
-echo "[2] Kernel dmcrypt performace options"
+echo "[2] Kernel dmcrypt performance options"
 echo -e "$PWD1" | $CRYPTSETUP open --type plain $DEV $DEV_NAME --perf-same_cpu_crypt >/dev/null 2>&1
 if [ $? -ne 0 ] ; then
 	echo "TEST SKIPPED: dmcrypt options not available"
@@ -81,6 +90,54 @@ else
 	$CRYPTSETUP status $DEV_NAME | grep -q same_cpu_crypt || fail
 	$CRYPTSETUP status $DEV_NAME | grep -q discards || fail
 	$CRYPTSETUP close $DEV_NAME || fail
+
+	format luks2
+	echo -e "$PWD1" | $CRYPTSETUP open $DEV $DEV_NAME --perf-same_cpu_crypt --perf-submit_from_crypt_cpus --persistent || fail
+	$CRYPTSETUP status $DEV_NAME | grep -q same_cpu_crypt || fail
+	$CRYPTSETUP status $DEV_NAME | grep -q submit_from_crypt_cpus || fail
+	$CRYPTSETUP close $DEV_NAME || fail
+	# Stored in metadata
+	echo -e "$PWD1" | $CRYPTSETUP open $DEV $DEV_NAME || fail
+	$CRYPTSETUP status $DEV_NAME | grep -q same_cpu_crypt || fail
+	$CRYPTSETUP status $DEV_NAME | grep -q submit_from_crypt_cpus || fail
+	$CRYPTSETUP close $DEV_NAME || fail
+	echo -e "$PWD1" | $CRYPTSETUP open $DEV $DEV_NAME --perf-same_cpu_crypt --allow-discards --persistent || fail
+	$CRYPTSETUP status $DEV_NAME | grep -q same_cpu_crypt || fail
+	$CRYPTSETUP status $DEV_NAME | grep -q discards || fail
+	$CRYPTSETUP close $DEV_NAME || fail
+	echo -e "$PWD1" | $CRYPTSETUP open $DEV $DEV_NAME || fail
+	$CRYPTSETUP status $DEV_NAME | grep -q same_cpu_crypt || fail
+	$CRYPTSETUP status $DEV_NAME | grep -q discards || fail
+	$CRYPTSETUP close $DEV_NAME || fail
+fi
+
+echo "[3] Kernel dmcrypt sector size options"
+echo -e "$PWD1" | $CRYPTSETUP open --type plain $DEV $DEV_NAME --sector-size 4096 >/dev/null 2>&1
+if [ $? -ne 0 ] ; then
+	echo "TEST SKIPPED: dmcrypt sector-size option not available"
+else
+	$CRYPTSETUP close $DEV_NAME || fail
+
+	echo -n "PLAIN sector size:"
+	echo -e "$PWD1" | $CRYPTSETUP open --type plain $DEV $DEV_NAME --sector-size 1234 >/dev/null 2>&1 && fail
+	for S in 512 1024 2048 4096; do
+		echo -n "[$S]"
+		echo -e "$PWD1" | $CRYPTSETUP open --type plain $DEV $DEV_NAME --sector-size $S || fail
+		check_sector_size $S
+		$CRYPTSETUP close $DEV_NAME || fail
+	done
+	echo
+
+	echo -n "LUKS2 sector size:"
+	echo -e "$PWD1" | $CRYPTSETUP luksFormat --type luks2 -$DEV --sector-size 1234 >/dev/null 2>&1 && fail
+	for S in 512 1024 2048 4096; do
+		echo -n "[$S]"
+		echo -e "$PWD1" | $CRYPTSETUP luksFormat --type luks2 --pbkdf pbkdf2 --pbkdf-force-iterations 1000 $DEV --sector-size $S || fail
+		echo -e "$PWD1" | $CRYPTSETUP open $DEV $DEV_NAME || fail
+		check_sector_size $S
+		$CRYPTSETUP close $DEV_NAME || fail
+	done
+	echo
 fi
 
 cleanup

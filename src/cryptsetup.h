@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004, Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2017, Milan Broz
+ * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2018, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -37,6 +37,7 @@
 #include <fcntl.h>
 #include <popt.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 #include "lib/nls.h"
 #include "lib/utils_crypt.h"
@@ -48,12 +49,17 @@
 #define CONST_CAST(x) (x)(uintptr_t)
 #define DEFAULT_CIPHER(type)	(DEFAULT_##type##_CIPHER "-" DEFAULT_##type##_MODE)
 #define SECTOR_SIZE 512
+#define MAX_SECTOR_SIZE 4096
 #define ROUND_SECTOR(x) (((x) + SECTOR_SIZE - 1) / SECTOR_SIZE)
+
+#define DEFAULT_WIPE_BLOCK	1048576 /* 1 MiB */
 
 extern int opt_debug;
 extern int opt_verbose;
 extern int opt_batch_mode;
 extern int opt_force_password;
+extern int opt_progress_frequency;
+
 
 /* Common tools */
 void clogger(struct crypt_device *cd, int level, const char *file, int line,
@@ -77,13 +83,19 @@ int tools_signals_blocked(void);
 
 int tools_get_key(const char *prompt,
 		  char **key, size_t *key_size,
-		  size_t keyfile_offset, size_t keyfile_size_max,
+		  uint64_t keyfile_offset, size_t keyfile_size_max,
 		  const char *key_file,
 		  int timeout, int verify, int pwquality,
 		  struct crypt_device *cd);
 int tools_is_stdin(const char *key_file);
 int tools_string_to_size(struct crypt_device *cd, const char *s, uint64_t *size);
 int tools_is_cipher_null(const char *cipher);
+
+void tools_clear_line(void);
+
+void tools_time_progress(uint64_t device_size, uint64_t bytes,
+			 struct timeval *start_time, struct timeval *end_time);
+int tools_wipe_progress(uint64_t size, uint64_t offset, void *usrptr);
 
 /* Log */
 #define log_dbg(x...) clogger(NULL, CRYPT_LOG_DEBUG, __FILE__, __LINE__, x)

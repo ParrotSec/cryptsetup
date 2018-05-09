@@ -1,8 +1,8 @@
 /*
  * crypto backend implementation
  *
- * Copyright (C) 2010-2017, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2017, Milan Broz
+ * Copyright (C) 2010-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2018, Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -31,6 +31,7 @@ struct crypt_cipher;
 struct crypt_storage;
 
 int crypt_backend_init(struct crypt_device *ctx);
+void crypt_backend_destroy(void);
 
 #define CRYPT_BACKEND_KERNEL (1 << 0)	/* Crypto uses kernel part, for benchmark */
 
@@ -52,20 +53,23 @@ int crypt_hmac_write(struct crypt_hmac *ctx, const char *buffer, size_t length);
 int crypt_hmac_final(struct crypt_hmac *ctx, char *buffer, size_t length);
 int crypt_hmac_destroy(struct crypt_hmac *ctx);
 
-/* RNG (if fips paramater set, must provide FIPS compliance) */
+/* RNG (if fips parameter set, must provide FIPS compliance) */
 enum { CRYPT_RND_NORMAL = 0, CRYPT_RND_KEY = 1, CRYPT_RND_SALT = 2 };
 int crypt_backend_rng(char *buffer, size_t length, int quality, int fips);
 
 /* PBKDF*/
-int crypt_pbkdf_check(const char *kdf, const char *hash,
-		      const char *password, size_t password_length,
-		      const char *salt, size_t salt_length,
-		      size_t key_length, uint64_t *iter_secs);
 int crypt_pbkdf(const char *kdf, const char *hash,
 		const char *password, size_t password_length,
 		const char *salt, size_t salt_length,
 		char *key, size_t key_length,
-		unsigned int iterations);
+		uint32_t iterations, uint32_t memory, uint32_t parallel);
+int crypt_pbkdf_perf(const char *kdf, const char *hash,
+		const char *password, size_t password_size,
+		const char *salt, size_t salt_size,
+		size_t volume_key_size, uint32_t time_ms,
+		uint32_t max_memory_kb, uint32_t parallel_threads,
+		uint32_t *iterations_out, uint32_t *memory_out,
+		int (*progress)(uint32_t time_ms, void *usrptr), void *usrptr);
 
 #if USE_INTERNAL_PBKDF2
 /* internal PBKDF2 implementation */
@@ -76,6 +80,12 @@ int pkcs5_pbkdf2(const char *hash,
 		 unsigned int dkLen, char *DK,
 		 unsigned int hash_block_size);
 #endif
+
+/* Argon2 implementation wrapper */
+int argon2(const char *type, const char *password, size_t password_length,
+	   const char *salt, size_t salt_length,
+	   char *key, size_t key_length,
+	   uint32_t iterations, uint32_t memory, uint32_t parallel);
 
 /* CRC32 */
 uint32_t crypt_crc32(uint32_t seed, const unsigned char *buf, size_t len);

@@ -1,7 +1,7 @@
 /*
  * cryptsetup kernel RNG access functions
  *
- * Copyright (C) 2010-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2018, Red Hat, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -215,8 +215,7 @@ int crypt_random_get(struct crypt_device *ctx, char *buf, size_t len, int qualit
 	}
 
 	if (status)
-		log_err(ctx, _("Error %d reading from RNG: %s\n"),
-			errno, strerror(errno));
+		log_err(ctx, _("Error reading from RNG.\n"));
 
 	return status;
 }

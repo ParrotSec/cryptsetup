@@ -1,4 +1,4 @@
-.TH CRYPTSETUP-REENCRYPT "8" "March 2017" "cryptsetup-reencrypt" "Maintenance Commands"
+.TH CRYPTSETUP-REENCRYPT "8" "January 2018" "cryptsetup-reencrypt" "Maintenance Commands"
 .SH NAME
 cryptsetup-reencrypt - tool for offline LUKS device re-encryption
 .SH SYNOPSIS
@@ -13,6 +13,10 @@ unclocked by passphrase), \fBcipher\fR, \fBcipher mode\fR.
 
 Cryptsetup-reencrypt reencrypts data on LUKS device in-place. During
 reencryption process the LUKS device is marked unavailable.
+
+\fBNOTE:\fR LUKS2 format support is limited. Currently the tool uses default
+values for new LUKS2 headers. Only those parameters shared with LUKS1 format
+may be changed (\-\-hash and \-\-iter\-time only).
 
 \fIWARNING\fR: The cryptsetup-reencrypt program is not resistant to hardware
 or kernel failures during reencryption (you can lose you data in this case).
@@ -38,7 +42,7 @@ To start (or continue) re-encryption for <device> use:
 \-\-device-size, \-\-hash, \-\-iter-time, \-\-use-random | \-\-use-urandom,
 \-\-keep-key, \-\-key-size, \-\-key-file, \-\-key-slot, \-\-keyfile-offset,
 \-\-keyfile-size, \-\-tries, \-\-use-directio, \-\-use-fsync, \-\-verbose, \-\-write-log,
-\-\-uuid]
+\-\-uuid, \-\-progress-frequency]
 
 To encrypt data on (not yet encrypted) device, use \fI\-\-new\fR with combination
 with \fI\-\-reduce-device-size\fR.
@@ -150,7 +154,7 @@ partition (so last sectors contains no data).
 For units suffix see \-\-device-size parameter description.
 
 \fBWARNING:\fR This is destructive operation and cannot be reverted.
-Use with extreme care - shrinked filesystems are usually unrecoverable.
+Use with extreme care - shrunk filesystems are usually unrecoverable.
 
 You cannot shrink device more than by 64 MiB (131072 sectors).
 .TP
@@ -189,6 +193,16 @@ of the interrupted decryption process.
 .TP
 .B "\-\-batch-mode, \-q"
 Suppresses all warnings and reencryption progress output.
+.TP
+.B "\-\-progress-frequency <seconds>"
+Print separate line every <seconds> with reencryption progress.
+.TP
+.B "\-\-type <type>"
+Use only while encrypting not yet encrypted device (see \-\-new).
+
+Specify LUKS version when performing in-place encryption. If the parameter
+is omitted default value (LUKS1) is used. Type may be one of: \fBluks\fR (default),
+\fBluks1\fR or \fBluks2\fR.
 .TP
 .B "\-\-version"
 Show the program version.
@@ -232,9 +246,9 @@ Please attach the output of the failed command with the
 .SH AUTHORS
 Cryptsetup-reencrypt was written by Milan Broz <gmazyland@gmail.com>.
 .SH COPYRIGHT
-Copyright \(co 2012-2017 Milan Broz
+Copyright \(co 2012-2018 Milan Broz
 .br
-Copyright \(co 2012-2017 Red Hat, Inc.
+Copyright \(co 2012-2018 Red Hat, Inc.
 
 This is free software; see the source for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.

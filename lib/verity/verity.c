@@ -1,7 +1,7 @@
 /*
  * dm-verity volume handling
  *
- * Copyright (C) 2012-2017, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2018, Red Hat, Inc. All rights reserved.
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -58,7 +58,6 @@ int VERITY_read_sb(struct crypt_device *cd,
 		   struct crypt_params_verity *params)
 {
 	struct device *device = crypt_metadata_device(cd);
-	int bsize = device_block_size(device);
 	struct verity_sb sb = {};
 	ssize_t hdr_size = sizeof(struct verity_sb);
 	int devfd = 0, sb_version;
@@ -78,13 +77,14 @@ int VERITY_read_sb(struct crypt_device *cd,
 	}
 
 	devfd = device_open(device, O_RDONLY);
-	if(devfd == -1) {
+	if (devfd < 0) {
 		log_err(cd, _("Cannot open device %s.\n"), device_path(device));
 		return -EINVAL;
 	}
 
-	if(lseek(devfd, sb_offset, SEEK_SET) < 0 ||
-	   read_blockwise(devfd, bsize, &sb, hdr_size) < hdr_size) {
+	if (read_lseek_blockwise(devfd, device_block_size(device),
+				 device_alignment(device), &sb, hdr_size,
+				 sb_offset) < hdr_size) {
 		close(devfd);
 		return -EIO;
 	}
@@ -123,6 +123,7 @@ int VERITY_read_sb(struct crypt_device *cd,
 		log_err(cd, _("Hash algorithm %s not supported.\n"),
 			params->hash_name);
 		free(CONST_CAST(char*)params->hash_name);
+		params->hash_name = NULL;
 		return -EINVAL;
 	}
 
@@ -130,11 +131,13 @@ int VERITY_read_sb(struct crypt_device *cd,
 	if (params->salt_size > sizeof(sb.salt)) {
 		log_err(cd, _("VERITY header corrupted.\n"));
 		free(CONST_CAST(char*)params->hash_name);
+		params->hash_name = NULL;
 		return -EINVAL;
 	}
 	params->salt = malloc(params->salt_size);
 	if (!params->salt) {
 		free(CONST_CAST(char*)params->hash_name);
+		params->hash_name = NULL;
 		return -ENOMEM;
 	}
 	memcpy(CONST_CAST(char*)params->salt, sb.salt, params->salt_size);
@@ -153,7 +156,6 @@ int VERITY_write_sb(struct crypt_device *cd,
 		   struct crypt_params_verity *params)
 {
 	struct device *device = crypt_metadata_device(cd);
-	int bsize = device_block_size(device);
 	struct verity_sb sb = {};
 	ssize_t hdr_size = sizeof(struct verity_sb);
 	char *algorithm;
@@ -176,7 +178,7 @@ int VERITY_write_sb(struct crypt_device *cd,
 	}
 
 	devfd = device_open(device, O_RDWR);
-	if(devfd == -1) {
+	if (devfd < 0) {
 		log_err(cd, _("Cannot open device %s.\n"), device_path(device));
 		return -EINVAL;
 	}
@@ -194,7 +196,8 @@ int VERITY_write_sb(struct crypt_device *cd,
 	memcpy(sb.salt, params->salt, params->salt_size);
 	memcpy(sb.uuid, uuid, sizeof(sb.uuid));
 
-	r = write_lseek_blockwise(devfd, bsize, (char*)&sb, hdr_size, sb_offset) < hdr_size ? -EIO : 0;
+	r = write_lseek_blockwise(devfd, device_block_size(device), device_alignment(device),
+				  (char*)&sb, hdr_size, sb_offset) < hdr_size ? -EIO : 0;
 	if (r)
 		log_err(cd, _("Error during update of verity header on device %s.\n"),
 			device_path(device));
@@ -233,10 +236,12 @@ int VERITY_activate(struct crypt_device *cd,
 		     const char *name,
 		     const char *root_hash,
 		     size_t root_hash_size,
+		     struct device *fec_device,
 		     struct crypt_params_verity *verity_hdr,
 		     uint32_t activation_flags)
 {
 	struct crypt_dm_active_device dmd;
+	uint32_t dmv_flags;
 	int r;
 
 	log_dbg("Trying to activate VERITY device %s using hash %s.",
@@ -256,9 +261,12 @@ int VERITY_activate(struct crypt_device *cd,
 	dmd.target = DM_VERITY;
 	dmd.data_device = crypt_data_device(cd);
 	dmd.u.verity.hash_device = crypt_metadata_device(cd);
+	dmd.u.verity.fec_device = fec_device;
 	dmd.u.verity.root_hash = root_hash;
 	dmd.u.verity.root_hash_size = root_hash_size;
-	dmd.u.verity.hash_offset = VERITY_hash_offset_block(verity_hdr),
+	dmd.u.verity.hash_offset = VERITY_hash_offset_block(verity_hdr);
+	dmd.u.verity.fec_offset = verity_hdr->fec_area_offset / verity_hdr->hash_block_size;
+	dmd.u.verity.hash_blocks = VERITY_hash_blocks(cd, verity_hdr);
 	dmd.flags = activation_flags;
 	dmd.size = verity_hdr->data_size * verity_hdr->data_block_size / 512;
 	dmd.uuid = crypt_get_uuid(cd);
@@ -274,8 +282,15 @@ int VERITY_activate(struct crypt_device *cd,
 	if (r)
 		return r;
 
+	if (dmd.u.verity.fec_device) {
+		r = device_block_adjust(cd, dmd.u.verity.fec_device, DEV_OK,
+					0, NULL, NULL);
+		if (r)
+			return r;
+	}
+
 	r = dm_create_device(cd, name, CRYPT_VERITY, &dmd, 0);
-	if (r < 0 && !(dm_flags() & DM_VERITY_SUPPORTED)) {
+	if (r < 0 && (dm_flags(DM_VERITY, &dmv_flags) || !(dmv_flags & DM_VERITY_SUPPORTED))) {
 		log_err(cd, _("Kernel doesn't support dm-verity mapping.\n"));
 		return -ENOTSUP;
 	}

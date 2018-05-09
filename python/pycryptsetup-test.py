@@ -2,7 +2,7 @@
 #
 # Python bindings to libcryptsetup test
 #
-# Copyright (C) 2011-2017, Red Hat, Inc. All rights reserved.
+# Copyright (C) 2011-2018, Red Hat, Inc. All rights reserved.
 #
 # This file is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -40,9 +40,6 @@ def askyes(txt):
     print("Question:", txt)
     return 1
 
-def askpassword(txt):
-    return PASSWORD
-
 def print_status(c):
     r = c.status()
     print("status  :",end="")
@@ -56,7 +53,7 @@ def print_status(c):
 
 if os.geteuid() != 0:
 	print("WARNING: You must be root to run this test, test skipped.")
-	sys.exit(0)
+	sys.exit(77)
 
 os.system("dd if=/dev/zero of=" + IMG + " bs=1M count=32 >/dev/null 2>&1")
 
@@ -64,8 +61,7 @@ c = pycryptsetup.CryptSetup(
         device = IMG,
         name = DEVICE,
         yesDialog = askyes,
-        logFunc = log,
-        passwordDialog = askpassword)
+        logFunc = log)
 
 #c.debugLevel(pycryptsetup.CRYPT_DEBUG_ALL);
 c.debugLevel(pycryptsetup.CRYPT_DEBUG_NONE);
@@ -108,16 +104,14 @@ c = pycryptsetup.CryptSetup(
         device = IMG,
         name = DEVICE,
         yesDialog = askyes,
-        logFunc = log,
-        passwordDialog = askpassword)
+        logFunc = log)
 
 print("activate:", c.activate(name = DEVICE, passphrase = PASSWORD))
 
 c2 = pycryptsetup.CryptSetup(
         name = DEVICE,
         yesDialog = askyes,
-        logFunc = log,
-        passwordDialog = askpassword)
+        logFunc = log)
 
 info = c2.info()
 print("cipher  :", info["cipher"])

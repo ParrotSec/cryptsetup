@@ -2,8 +2,8 @@
  * LUKS - Linux Unified Key Setup
  *
  * Copyright (C) 2004-2006, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2017, Milan Broz
+ * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2018, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -21,15 +21,17 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include <fcntl.h>
 #include <errno.h>
 #include "luks.h"
+#include "af.h"
 #include "internal.h"
 
 static void _error_hint(struct crypt_device *ctx, const char *device,
 			const char *cipher, const char *mode, size_t keyLength)
 {
-	char cipher_spec[MAX_CIPHER_LEN * 3];
+	char *c, cipher_spec[MAX_CIPHER_LEN * 3];
 
 	if (snprintf(cipher_spec, sizeof(cipher_spec), "%s-%s", cipher, mode) < 0)
 		return;
@@ -40,13 +42,15 @@ static void _error_hint(struct crypt_device *ctx, const char *device,
 
 	if (!strncmp(mode, "xts", 3) && (keyLength != 256 && keyLength != 512))
 		log_err(ctx, _("Key size in XTS mode must be 256 or 512 bits.\n"));
+	else if (!(c = strchr(mode, '-')) || strlen(c) < 4)
+		log_err(ctx, _("Cipher specification should be in [cipher]-[mode]-[iv] format.\n"));
 }
 
 static int LUKS_endec_template(char *src, size_t srcLength,
 			       const char *cipher, const char *cipher_mode,
 			       struct volume_key *vk,
 			       unsigned int sector,
-			       ssize_t (*func)(int, int, void *, size_t),
+			       ssize_t (*func)(int, size_t, size_t, void *, size_t),
 			       int mode,
 			       struct crypt_device *ctx)
 {
@@ -62,17 +66,24 @@ static int LUKS_endec_template(char *src, size_t srcLength,
 			.vk     = vk,
 			.offset = sector,
 			.iv_offset = 0,
+			.sector_size = SECTOR_SIZE,
 		}
 	};
-	int r, bsize, devfd = -1;
+	int r, devfd = -1;
+	size_t bsize, keyslot_alignment, alignment;
 
 	log_dbg("Using dmcrypt to access keyslot area.");
 
 	bsize = device_block_size(dmd.data_device);
-	if (bsize <= 0)
+	alignment = device_alignment(dmd.data_device);
+	if (!bsize || !alignment)
 		return -EINVAL;
 
-	dmd.size = size_round_up(srcLength, bsize) / SECTOR_SIZE;
+	if (bsize > LUKS_ALIGN_KEYSLOTS)
+		keyslot_alignment = LUKS_ALIGN_KEYSLOTS;
+	else
+		keyslot_alignment = bsize;
+	dmd.size = size_round_up(srcLength, keyslot_alignment) / SECTOR_SIZE;
 
 	if (mode == O_RDONLY)
 		dmd.flags |= CRYPT_ACTIVATE_READONLY;
@@ -113,16 +124,16 @@ static int LUKS_endec_template(char *src, size_t srcLength,
 		goto out;
 	}
 
-	r = func(devfd, bsize, src, srcLength);
+	r = func(devfd, bsize, alignment, src, srcLength);
 	if (r < 0) {
 		log_err(ctx, _("Failed to access temporary keystore device.\n"));
 		r = -EIO;
 	} else
 		r = 0;
  out:
-	if(devfd != -1)
+	if (devfd != -1)
 		close(devfd);
-	dm_remove_device(ctx, name, 1, dmd.size);
+	dm_remove_device(ctx, name, CRYPT_DEACTIVATE_FORCE);
 	return r;
 }
 
@@ -136,7 +147,7 @@ int LUKS_encrypt_to_storage(char *src, size_t srcLength,
 
 	struct device *device = crypt_metadata_device(ctx);
 	struct crypt_storage *s;
-	int devfd = -1, bsize, r = 0;
+	int devfd = -1, r = 0;
 
 	/* Only whole sector writes supported */
 	if (srcLength % SECTOR_SIZE)
@@ -171,21 +182,18 @@ int LUKS_encrypt_to_storage(char *src, size_t srcLength,
 	r = -EIO;
 
 	/* Write buffer to device */
-	bsize = device_block_size(device);
-	if (bsize <= 0)
-		goto out;
-
 	devfd = device_open(device, O_RDWR);
-	if (devfd == -1)
+	if (devfd < 0)
 		goto out;
 
-	if (lseek(devfd, sector * SECTOR_SIZE, SEEK_SET) == -1 ||
-	    write_blockwise(devfd, bsize, src, srcLength) == -1)
+	if (write_lseek_blockwise(devfd, device_block_size(device),
+				  device_alignment(device), src, srcLength,
+				  sector * SECTOR_SIZE) < 0)
 		goto out;
 
 	r = 0;
 out:
-	if(devfd != -1)
+	if (devfd >= 0)
 		close(devfd);
 	if (r)
 		log_err(ctx, _("IO error while encrypting keyslot.\n"));
@@ -202,7 +210,7 @@ int LUKS_decrypt_from_storage(char *dst, size_t dstLength,
 {
 	struct device *device = crypt_metadata_device(ctx);
 	struct crypt_storage *s;
-	int devfd = -1, bsize, r = 0;
+	int devfd = -1, r = 0;
 
 	/* Only whole sector reads supported */
 	if (dstLength % SECTOR_SIZE)
@@ -230,16 +238,13 @@ int LUKS_decrypt_from_storage(char *dst, size_t dstLength,
 	r = -EIO;
 
 	/* Read buffer from device */
-	bsize = device_block_size(device);
-	if (bsize <= 0)
-		goto bad;
-
 	devfd = device_open(device, O_RDONLY);
-	if (devfd == -1)
+	if (devfd < 0)
 		goto bad;
 
-	if (lseek(devfd, sector * SECTOR_SIZE, SEEK_SET) == -1 ||
-	    read_blockwise(devfd, bsize, dst, dstLength) == -1)
+	if (read_lseek_blockwise(devfd, device_block_size(device),
+				 device_alignment(device), dst, dstLength,
+				 sector * SECTOR_SIZE) < 0)
 		goto bad;
 
 	close(devfd);
@@ -250,7 +255,7 @@ int LUKS_decrypt_from_storage(char *dst, size_t dstLength,
 
 	return r;
 bad:
-	if(devfd != -1)
+	if (devfd >= 0)
 		close(devfd);
 
 	log_err(ctx, _("IO error while decrypting keyslot.\n"));

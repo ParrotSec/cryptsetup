@@ -2,7 +2,7 @@
  * Generic wrapper for storage encryption modes and Initial Vectors
  * (reimplementation of some functions from Linux dm-crypt kernel)
  *
- * Copyright (C) 2014-2017, Milan Broz
+ * Copyright (C) 2014-2018, Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -32,7 +32,7 @@
  * IV documentation: https://gitlab.com/cryptsetup/cryptsetup/wikis/DMCrypt
  */
 struct crypt_sector_iv {
-	enum { IV_NONE, IV_NULL, IV_PLAIN, IV_PLAIN64, IV_ESSIV, IV_BENBI } type;
+	enum { IV_NONE, IV_NULL, IV_PLAIN, IV_PLAIN64, IV_ESSIV, IV_BENBI, IV_PLAIN64BE } type;
 	int iv_size;
 	char *iv;
 	struct crypt_cipher *essiv_cipher;
@@ -61,19 +61,24 @@ static int crypt_sector_iv_init(struct crypt_sector_iv *ctx,
 	memset(ctx, 0, sizeof(*ctx));
 
 	ctx->iv_size = crypt_cipher_blocksize(cipher_name);
-	if (ctx->iv_size < 0)
+	if (ctx->iv_size < 8)
 		return -ENOENT;
 
-	if (!iv_name ||
-	    !strcmp(cipher_name, "cipher_null") ||
+	if (!strcmp(cipher_name, "cipher_null") ||
 	    !strcmp(mode_name, "ecb")) {
+		if (iv_name)
+			return -EINVAL;
 		ctx->type = IV_NONE;
 		ctx->iv_size = 0;
 		return 0;
+	} else if (!iv_name) {
+		return -EINVAL;
 	} else if (!strcasecmp(iv_name, "null")) {
 		ctx->type = IV_NULL;
 	} else if (!strcasecmp(iv_name, "plain64")) {
 		ctx->type = IV_PLAIN64;
+	} else if (!strcasecmp(iv_name, "plain64be")) {
+		ctx->type = IV_PLAIN64BE;
 	} else if (!strcasecmp(iv_name, "plain")) {
 		ctx->type = IV_PLAIN;
 	} else if (!strncasecmp(iv_name, "essiv:", 6)) {
@@ -150,6 +155,10 @@ static int crypt_sector_iv_generate(struct crypt_sector_iv *ctx, uint64_t sector
 	case IV_PLAIN64:
 		memset(ctx->iv, 0, ctx->iv_size);
 		*(uint64_t *)ctx->iv = cpu_to_le64(sector);
+		break;
+	case IV_PLAIN64BE:
+		memset(ctx->iv, 0, ctx->iv_size);
+		*(uint64_t *)&ctx->iv[ctx->iv_size - sizeof(uint64_t)] = cpu_to_be64(sector);
 		break;
 	case IV_ESSIV:
 		memset(ctx->iv, 0, ctx->iv_size);

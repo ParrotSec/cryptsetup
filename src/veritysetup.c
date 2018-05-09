@@ -1,8 +1,8 @@
 /*
  * veritysetup - setup cryptographic volumes for dm-verity
  *
- * Copyright (C) 2012-2017, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2017, Milan Broz
+ * Copyright (C) 2012-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2018, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -25,6 +25,8 @@
 
 static int use_superblock = 1;
 
+static const char *fec_device = NULL;
+static int fec_roots = DEFAULT_VERITY_FEC_ROOTS;
 static const char *hash_algorithm = NULL;
 static int hash_type = 1;
 static int data_block_size = DEFAULT_VERITY_DATA_BLOCK;
@@ -32,6 +34,7 @@ static int hash_block_size = DEFAULT_VERITY_HASH_BLOCK;
 static uint64_t data_blocks = 0;
 static const char *salt_string = NULL;
 static uint64_t hash_offset = 0;
+static uint64_t fec_offset = 0;
 static const char *opt_uuid = NULL;
 static int opt_restart_on_corruption = 0;
 static int opt_ignore_corruption = 0;
@@ -51,6 +54,8 @@ static int _prepare_format(struct crypt_params_verity *params,
 
 	params->hash_name = hash_algorithm ?: DEFAULT_VERITY_HASH;
 	params->data_device = data_device;
+	params->fec_device = fec_device;
+	params->fec_roots = fec_roots;
 
 	if (salt_string && !strcmp(salt_string, "-")) {
 		params->salt_size = 0;
@@ -72,6 +77,7 @@ static int _prepare_format(struct crypt_params_verity *params,
 	params->hash_block_size = hash_block_size;
 	params->data_size = data_blocks;
 	params->hash_area_offset = hash_offset;
+	params->fec_area_offset = fec_offset;
 	params->hash_type = hash_type;
 	params->flags = flags;
 
@@ -93,6 +99,17 @@ static int action_format(int arg)
 	} else if (r >= 0) {
 		log_dbg("Created hash image %s.", action_argv[1]);
 		close(r);
+	}
+	/* Try to create FEC image if doesn't exist */
+	if (fec_device) {
+		r = open(fec_device, O_WRONLY | O_EXCL | O_CREAT, S_IRUSR | S_IWUSR);
+		if (r < 0 && errno != EEXIST) {
+			log_err(_("Cannot create FEC image %s for writing.\n"), fec_device);
+			return -EINVAL;
+		} else if (r >= 0) {
+			log_dbg("Created FEC image %s.", fec_device);
+			close(r);
+		}
 	}
 
 	if ((r = crypt_init(&cd, action_argv[1])))
@@ -140,6 +157,9 @@ static int _activate(const char *dm_device,
 	if (use_superblock) {
 		params.flags = flags;
 		params.hash_area_offset = hash_offset;
+		params.fec_area_offset = fec_offset;
+		params.fec_device = fec_device;
+		params.fec_roots = fec_roots;
 		r = crypt_load(cd, CRYPT_VERITY, &params);
 	} else {
 		r = _prepare_format(&params, data_device, flags | CRYPT_VERITY_NO_HEADER);
@@ -170,10 +190,10 @@ out:
 	return r;
 }
 
-static int action_create(int arg)
+static int action_open(int arg)
 {
-	return _activate(action_argv[0],
-			 action_argv[1],
+	return _activate(action_argv[1],
+			 action_argv[0],
 			 action_argv[2],
 			 action_argv[3], 0);
 }
@@ -187,7 +207,7 @@ static int action_verify(int arg)
 			 CRYPT_VERITY_CHECK_HASH);
 }
 
-static int action_remove(int arg)
+static int action_close(int arg)
 {
 	struct crypt_device *cd = NULL;
 	int r;
@@ -284,6 +304,17 @@ static int action_status(int arg)
 		log_std("  hash offset: %" PRIu64 " sectors\n",
 			vp.hash_area_offset * vp.hash_block_size / 512);
 
+		if (vp.fec_device) {
+			log_std("  FEC device:  %s\n", vp.fec_device);
+			if (crypt_loop_device(vp.fec_device)) {
+				backing_file = crypt_loop_backing_file(vp.fec_device);
+				log_std("  FEC loop:    %s\n", backing_file);
+				free(backing_file);
+			}
+			log_std("  FEC offset:  %" PRIu64 " sectors\n",
+				vp.fec_area_offset * vp.hash_block_size / 512);
+			log_std("  FEC roots:   %u\n", vp.fec_roots);
+		}
 		if (cad.flags & (CRYPT_ACTIVATE_IGNORE_CORRUPTION|
 				 CRYPT_ACTIVATE_RESTART_ON_CORRUPTION|
 				 CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS))
@@ -309,6 +340,7 @@ static int action_dump(int arg)
 		return r;
 
 	params.hash_area_offset = hash_offset;
+	params.fec_area_offset = fec_offset;
 	r = crypt_load(cd, CRYPT_VERITY, &params);
 	if (!r)
 		crypt_dump(cd);
@@ -325,8 +357,8 @@ static struct action_type {
 } action_types[] = {
 	{ "format",	action_format, 2, N_("<data_device> <hash_device>"),N_("format device") },
 	{ "verify",	action_verify, 3, N_("<data_device> <hash_device> <root_hash>"),N_("verify device") },
-	{ "create",	action_create, 4, N_("<name> <data_device> <hash_device> <root_hash>"),N_("create active device") },
-	{ "remove",	action_remove, 1, N_("<name>"),N_("remove (deactivate) device") },
+	{ "open",	action_open,   4, N_("<data_device> <name> <hash_device> <root_hash>"),N_("open device as <name>") },
+	{ "close",	action_close,  1, N_("<name>"),N_("close device (deactivate and remove mapping)") },
 	{ "status",	action_status, 1, N_("<name>"),N_("show active device status") },
 	{ "dump",	action_dump,   1, N_("<hash_device>"),N_("show on-disk information") },
 	{ NULL, NULL, 0, NULL, NULL }
@@ -396,8 +428,11 @@ int main(int argc, const char **argv)
 		{ "format",          0,    POPT_ARG_INT,  &hash_type,        0, N_("Format type (1 - normal, 0 - original Chrome OS)"), N_("number") },
 		{ "data-block-size", 0,    POPT_ARG_INT,  &data_block_size,  0, N_("Block size on the data device"), N_("bytes") },
 		{ "hash-block-size", 0,    POPT_ARG_INT,  &hash_block_size,  0, N_("Block size on the hash device"), N_("bytes") },
+		{ "fec-roots",       0,    POPT_ARG_INT,  &fec_roots,        0, N_("FEC parity bytes"), N_("bytes") },
 		{ "data-blocks",     0,    POPT_ARG_STRING, &popt_tmp,       1, N_("The number of blocks in the data file"), N_("blocks") },
+		{ "fec-device",      0,    POPT_ARG_STRING, &fec_device,     0, N_("Path to device with error correction data"), N_("path") },
 		{ "hash-offset",     0,    POPT_ARG_STRING, &popt_tmp,       2, N_("Starting offset on the hash device"), N_("bytes") },
+		{ "fec-offset",      0,    POPT_ARG_STRING, &popt_tmp,       3, N_("Starting offset on the FEC device"), N_("bytes") },
 		{ "hash",            'h',  POPT_ARG_STRING, &hash_algorithm, 0, N_("Hash algorithm"), N_("string") },
 		{ "salt",            's',  POPT_ARG_STRING, &salt_string,    0, N_("Salt"), N_("hex string") },
 		{ "uuid",            '\0', POPT_ARG_STRING, &opt_uuid,       0, N_("UUID for device to use."), NULL },
@@ -440,6 +475,9 @@ int main(int argc, const char **argv)
 			case 2:
 				hash_offset = ull_value;
 				break;
+			case 3:
+				fec_offset = ull_value;
+				break;
 		}
 
 		if (r < 0)
@@ -459,12 +497,6 @@ int main(int argc, const char **argv)
 	if (!(aname = poptGetArg(popt_context)))
 		usage(popt_context, EXIT_FAILURE, _("Argument <action> missing."),
 		      poptGetInvocationName(popt_context));
-	for(action = action_types; action->type; action++)
-		if (strcmp(action->type, aname) == 0)
-			break;
-	if (!action->type)
-		usage(popt_context, EXIT_FAILURE, _("Unknown action."),
-		      poptGetInvocationName(popt_context));
 
 	action_argc = 0;
 	action_argv = poptGetArgs(popt_context);
@@ -476,7 +508,28 @@ int main(int argc, const char **argv)
 	while(action_argv[action_argc] != NULL)
 		action_argc++;
 
-	if(action_argc < action->required_action_argc) {
+	/* Handle aliases */
+	if (!strcmp(aname, "create")) {
+		/* create command had historically switched arguments */
+		if (action_argv[0] && action_argv[1]) {
+			const char *tmp = action_argv[0];
+			action_argv[0] = action_argv[1];
+			action_argv[1] = tmp;
+		}
+		aname = "open";
+	} else if (!strcmp(aname, "remove")) {
+		aname = "close";
+	}
+
+	for (action = action_types; action->type; action++)
+		if (strcmp(action->type, aname) == 0)
+			break;
+
+	if (!action->type)
+		usage(popt_context, EXIT_FAILURE, _("Unknown action."),
+		      poptGetInvocationName(popt_context));
+
+	if (action_argc < action->required_action_argc) {
 		char buf[128];
 		snprintf(buf, 128,_("%s: requires %s as arguments"), action->type, action->arg_desc);
 		usage(popt_context, EXIT_FAILURE, buf,
@@ -489,9 +542,9 @@ int main(int argc, const char **argv)
 		      poptGetInvocationName(popt_context));
 	}
 
-	if ((opt_ignore_corruption || opt_restart_on_corruption || opt_ignore_zero_blocks) && strcmp(aname, "create"))
+	if ((opt_ignore_corruption || opt_restart_on_corruption || opt_ignore_zero_blocks) && strcmp(aname, "open"))
 		usage(popt_context, EXIT_FAILURE,
-		_("Option --ignore-corruption, --restart-on-corruption or --ignore-zero-blocks is allowed only for create operation.\n"),
+		_("Option --ignore-corruption, --restart-on-corruption or --ignore-zero-blocks is allowed only for open operation.\n"),
 		poptGetInvocationName(popt_context));
 
 	if (opt_ignore_corruption && opt_restart_on_corruption)

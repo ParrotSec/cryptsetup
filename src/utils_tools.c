@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004, Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2017, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2017, Milan Broz
+ * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2018, Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -22,11 +22,13 @@
  */
 
 #include "cryptsetup.h"
+#include <math.h>
 #include <signal.h>
 
 int opt_verbose = 0;
 int opt_debug = 0;
 int opt_batch_mode = 0;
+int opt_progress_frequency = 0;
 
 /* interrupt handling */
 volatile int quit = 0;
@@ -164,7 +166,7 @@ int yesDialog(const char *msg, void *usrptr __attribute__((unused)))
 
 void show_status(int errcode)
 {
-	char error[256];
+	char *crypt_error;
 
 	if(!opt_verbose)
 		return;
@@ -174,25 +176,23 @@ void show_status(int errcode)
 		return;
 	}
 
-	crypt_get_error(error, sizeof(error));
+	if (errcode < 0)
+		errcode = translate_errno(errcode);
 
-	if (*error) {
-#ifdef STRERROR_R_CHAR_P /* GNU-specific strerror_r */
-		char *error_ = strerror_r(-errcode, error, sizeof(error));
-		if (error_ != error)
-			strncpy(error, error_, sizeof(error));
-#else /* POSIX strerror_r variant */
-		if (strerror_r(-errcode, error, sizeof(error)))
-			*error = '\0';
-#endif
-		error[sizeof(error) - 1] = '\0';
-	}
-
-	log_err(_("Command failed with code %i"), -errcode);
-	if (*error)
-		log_err(": %s\n", error);
+	if (errcode == 1)
+		crypt_error = _("wrong or missing parameters");
+	else if (errcode == 2)
+		crypt_error = _("no permission or bad passphrase");
+	else if (errcode == 3)
+		crypt_error = _("out of memory");
+	else if (errcode == 4)
+		crypt_error = _("wrong device or file specified");
+	else if (errcode == 5)
+		crypt_error = _("device already exists or device is busy");
 	else
-		log_err(".\n");
+		crypt_error = _("unknown error");
+
+	log_std(_("Command failed with code %i (%s).\n"), -errcode, crypt_error);
 }
 
 const char *uuid_or_device(const char *spec)
@@ -326,4 +326,97 @@ int tools_string_to_size(struct crypt_device *cd, const char *s, uint64_t *size)
 
 	*size = tmp;
 	return 0;
+}
+
+/* Time progress helper */
+
+/* The difference in seconds between two times in "timeval" format. */
+static double time_diff(struct timeval *start, struct timeval *end)
+{
+	return (end->tv_sec - start->tv_sec)
+		+ (end->tv_usec - start->tv_usec) / 1E6;
+}
+
+void tools_clear_line(void)
+{
+	if (opt_progress_frequency)
+		return;
+	/* vt100 code clear line */
+	log_std("\33[2K\r");
+}
+
+void tools_time_progress(uint64_t device_size, uint64_t bytes,
+			 struct timeval *start_time, struct timeval *end_time)
+{
+	struct timeval now_time;
+	unsigned long long mbytes, eta;
+	double tdiff, mib, frequency;
+	int final = (bytes == device_size);
+	const char *eol;
+
+	if (opt_batch_mode)
+		return;
+
+	gettimeofday(&now_time, NULL);
+	if (start_time->tv_sec == 0 && start_time->tv_usec == 0) {
+		*start_time = now_time;
+		*end_time = now_time;
+		return;
+	}
+
+	if (opt_progress_frequency) {
+		frequency = (double)opt_progress_frequency;
+		eol = "\n";
+	} else {
+		frequency = 0.5;
+		eol = "";
+	}
+
+	if (!final && time_diff(end_time, &now_time) < frequency)
+		return;
+
+	*end_time = now_time;
+
+	tdiff = time_diff(start_time, end_time);
+	if (!tdiff)
+		return;
+
+	mbytes = bytes  / 1024 / 1024;
+	mib = (double)(mbytes) / tdiff;
+	if (!mib)
+		return;
+
+	/* FIXME: calculate this from last minute only and remaining space */
+	eta = (unsigned long long)(device_size / 1024 / 1024 / mib - tdiff);
+
+	tools_clear_line();
+	if (final)
+		log_std("Finished, time %02llu:%02llu.%03llu, "
+			"%4llu MiB written, speed %5.1f MiB/s\n",
+			(unsigned long long)tdiff / 60,
+			(unsigned long long)tdiff % 60,
+			(unsigned long long)((tdiff - floor(tdiff)) * 1000.0),
+			mbytes, mib);
+	else
+		log_std("Progress: %5.1f%%, ETA %02llu:%02llu, "
+			"%4llu MiB written, speed %5.1f MiB/s%s",
+			(double)bytes / device_size * 100,
+			eta / 60, eta % 60, mbytes, mib, eol);
+	fflush(stdout);
+}
+
+int tools_wipe_progress(uint64_t size, uint64_t offset, void *usrptr)
+{
+	static struct timeval start_time = {}, end_time = {};
+	int r = 0;
+
+	tools_time_progress(size, offset, &start_time, &end_time);
+
+	check_signal(&r);
+	if (r) {
+		tools_clear_line();
+		log_err("\nWipe interrupted.\n");
+	}
+
+	return r;
 }

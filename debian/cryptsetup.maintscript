@@ -1,1 +1,0 @@
-rm_conffile /etc/bash_completion.d/cryptdisks 2:1.7.0-3
