@@ -31,6 +31,7 @@ static int keyring_open(struct crypt_device *cd,
 {
 	json_object *jobj_token, *jobj_key;
 	struct luks2_hdr *hdr;
+	int r;
 
 	if (!(hdr = crypt_get_hdr(cd, CRYPT_LUKS2)))
 		return -EINVAL;
@@ -41,8 +42,14 @@ static int keyring_open(struct crypt_device *cd,
 
 	json_object_object_get_ex(jobj_token, "key_description", &jobj_key);
 
-	if (crypt_get_passphrase_from_keyring(json_object_get_string(jobj_key), buffer, buffer_len))
+	r = keyring_get_passphrase(json_object_get_string(jobj_key), buffer, buffer_len);
+	if (r == -ENOTSUP) {
+		log_dbg("Kernel keyring features disabled.");
 		return -EINVAL;
+	} else if (r < 0) {
+		log_dbg("keyring_get_passphrase failed (error %d)", r);
+		return -EINVAL;
+	}
 
 	return 0;
 }
@@ -60,6 +67,11 @@ static int keyring_validate(struct crypt_device *cd __attribute__((unused)),
 	if (!jobj_token) {
 		log_dbg("Keyring token JSON parse failed.");
 		return r;
+	}
+
+	if (json_object_object_length(jobj_token) != 3) {
+		log_dbg("Keyring token is expected to have exactly 3 fields.");
+		goto out;
 	}
 
 	if (!json_object_object_get_ex(jobj_token, "key_description", &jobj_key)) {

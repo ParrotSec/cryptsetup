@@ -51,10 +51,6 @@
 #define DEFAULT_MEM_ALIGNMENT	4096
 #define MAX_ERROR_LENGTH	512
 
-#define MAX_PBKDF_THREADS	4
-#define MAX_PBKDF_MEMORY	4*1024*1024 /* 4GiB */
-#define MIN_PBKDF2_ITERATIONS	1000 /* recommendation in NIST SP 800-132 */
-
 #define at_least(a, b) ({ __typeof__(a) __at_least = (a); (__at_least >= (b))?__at_least:(b); })
 
 struct crypt_device;
@@ -68,8 +64,7 @@ struct volume_key {
 struct volume_key *crypt_alloc_volume_key(size_t keylength, const char *key);
 struct volume_key *crypt_generate_volume_key(struct crypt_device *cd, size_t keylength);
 void crypt_free_volume_key(struct volume_key *vk);
-void crypt_volume_key_set_description(struct volume_key *key, const char *key_description);
-const char *crypt_volume_key_get_description(const struct volume_key *key);
+int crypt_volume_key_set_description(struct volume_key *key, const char *key_description);
 
 struct crypt_pbkdf_type *crypt_get_pbkdf(struct crypt_device *cd);
 int init_pbkdf_type(struct crypt_device *cd,
@@ -196,6 +191,9 @@ int crypt_get_integrity_tag_size(struct crypt_device *cd);
 
 int crypt_key_in_keyring(struct crypt_device *cd);
 void crypt_set_key_in_keyring(struct crypt_device *cd, unsigned key_in_keyring);
+int crypt_volume_key_load_in_keyring(struct crypt_device *cd, struct volume_key *vk);
+int crypt_use_keyring_for_vk(const struct crypt_device *cd);
+void crypt_drop_keyring_key(struct crypt_device *cd, const char *key_description);
 
 static inline uint64_t version(uint16_t major, uint16_t minor, uint16_t patch, uint16_t release)
 {

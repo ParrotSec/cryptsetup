@@ -284,6 +284,8 @@ setup_mapping()
 		return 1
 	fi
 
+	# Create locking directory before invoking cryptsetup(8) to avoid warnings
+	mkdir -pm0700 /run/cryptsetup
 
 	# Prepare commands
 	cryptopen="/sbin/cryptsetup -T 1"

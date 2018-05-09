@@ -96,7 +96,7 @@ int crypt_cipher_blocksize(const char *name)
  * (but cannot check specificaly for skcipher API)
  */
 int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
-		    const char *mode, const void *buffer, size_t length)
+		    const char *mode, const void *key, size_t key_length)
 {
 	struct crypt_cipher *h;
 	struct sockaddr_alg sa = {
@@ -124,9 +124,9 @@ int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
 	}
 
 	if (!strcmp(name, "cipher_null"))
-		length = 0;
+		key_length = 0;
 
-	if (setsockopt(h->tfmfd, SOL_ALG, ALG_SET_KEY, buffer, length) < 0) {
+	if (setsockopt(h->tfmfd, SOL_ALG, ALG_SET_KEY, key, key_length) < 0) {
 		crypt_cipher_destroy(h);
 		return -EINVAL;
 	}
@@ -225,7 +225,7 @@ int crypt_cipher_decrypt(struct crypt_cipher *ctx,
 				  iv, iv_length, ALG_OP_DECRYPT);
 }
 
-int crypt_cipher_destroy(struct crypt_cipher *ctx)
+void crypt_cipher_destroy(struct crypt_cipher *ctx)
 {
 	if (ctx->tfmfd >= 0)
 		close(ctx->tfmfd);
@@ -233,7 +233,6 @@ int crypt_cipher_destroy(struct crypt_cipher *ctx)
 		close(ctx->opfd);
 	memset(ctx, 0, sizeof(*ctx));
 	free(ctx);
-	return 0;
 }
 
 #else /* ENABLE_AF_ALG */
@@ -249,9 +248,9 @@ int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
 	return -ENOTSUP;
 }
 
-int crypt_cipher_destroy(struct crypt_cipher *ctx)
+void crypt_cipher_destroy(struct crypt_cipher *ctx)
 {
-	return 0;
+	return;
 }
 
 int crypt_cipher_encrypt(struct crypt_cipher *ctx,

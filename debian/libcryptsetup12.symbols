@@ -74,6 +74,7 @@ libcryptsetup.so.12 libcryptsetup12 #MINVER#
  crypt_status@CRYPTSETUP_2.0 2:1.4
  crypt_suspend@CRYPTSETUP_2.0 2:1.4
  crypt_token_assign_keyslot@CRYPTSETUP_2.0 2:2.0
+ crypt_token_is_assigned@CRYPTSETUP_2.0 2:2.0.2
  crypt_token_json_get@CRYPTSETUP_2.0 2:2.0
  crypt_token_json_set@CRYPTSETUP_2.0 2:2.0
  crypt_token_luks2_keyring_get@CRYPTSETUP_2.0 2:2.0

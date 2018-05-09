@@ -37,7 +37,11 @@ static const char *opt_uuid = NULL;
 static const char *opt_type = "luks";
 static long opt_keyfile_size = 0;
 static long opt_keyfile_offset = 0;
-static int opt_iteration_time = 1000;
+static int opt_iteration_time = 0;
+static const char *opt_pbkdf = NULL;
+static long opt_pbkdf_memory = DEFAULT_LUKS2_MEMORY_KB;
+static long opt_pbkdf_parallel = DEFAULT_LUKS2_PARALLEL_THREADS;
+static long opt_pbkdf_iterations = 0;
 static int opt_version_mode = 0;
 static int opt_random = 0;
 static int opt_urandom = 0;
@@ -61,6 +65,7 @@ static uint64_t opt_device_size = 0;
 static const char **action_argv;
 
 #define MAX_SLOT 32
+#define MAX_TOKEN 32
 struct reenc_ctx {
 	char *device;
 	char *device_uuid;
@@ -77,6 +82,7 @@ struct reenc_ctx {
 	enum { REENCRYPT = 0, ENCRYPT = 1, DECRYPT = 2 } reencrypt_mode;
 
 	char header_file_org[PATH_MAX];
+	char header_file_tmp[PATH_MAX];
 	char header_file_new[PATH_MAX];
 	char log_file[PATH_MAX];
 
@@ -490,6 +496,35 @@ out:
 	return r;
 }
 
+static int set_pbkdf_params(struct crypt_device *cd, const char *dev_type)
+{
+	struct crypt_pbkdf_type pbkdf = {};
+
+	if (!strcmp(dev_type, CRYPT_LUKS1)) {
+		if (opt_pbkdf && strcmp(opt_pbkdf, CRYPT_KDF_PBKDF2))
+			return -EINVAL;
+		pbkdf.type = CRYPT_KDF_PBKDF2;
+		pbkdf.hash = opt_hash ?: DEFAULT_LUKS1_HASH;
+		pbkdf.time_ms = opt_iteration_time ?: DEFAULT_LUKS1_ITER_TIME;
+	} else if (!strcmp(dev_type, CRYPT_LUKS2)) {
+		pbkdf.type = opt_pbkdf ?: DEFAULT_LUKS2_PBKDF;
+		pbkdf.hash = opt_hash ?: DEFAULT_LUKS1_HASH;
+		pbkdf.time_ms = opt_iteration_time ?: DEFAULT_LUKS2_ITER_TIME;
+		if (strcmp(pbkdf.type, CRYPT_KDF_PBKDF2)) {
+			pbkdf.max_memory_kb = opt_pbkdf_memory;
+			pbkdf.parallel_threads = opt_pbkdf_parallel;
+		}
+	} else
+		return -EINVAL;
+
+	if (opt_pbkdf_iterations) {
+		pbkdf.iterations = opt_pbkdf_iterations;
+		pbkdf.flags |= CRYPT_PBKDF_NO_BENCHMARK;
+	}
+
+	return crypt_set_pbkdf_type(cd, &pbkdf);
+}
+
 static int create_new_header(struct reenc_ctx *rc, const char *cipher,
 			     const char *cipher_mode, const char *uuid,
 			     const char *key, int key_size,
@@ -507,8 +542,11 @@ static int create_new_header(struct reenc_ctx *rc, const char *cipher,
 	else if (opt_urandom)
 		crypt_set_rng_type(cd_new, CRYPT_RNG_URANDOM);
 
-	if (opt_iteration_time)
-		crypt_set_iteration_time(cd_new, opt_iteration_time);
+	r = set_pbkdf_params(cd_new, type);
+	if (r) {
+		log_err(_("Failed to set PBKDF parameters.\n"));
+		goto out;
+	}
 
 	if ((r = crypt_format(cd_new, type, cipher, cipher_mode,
 			      uuid, key, key_size, params)))
@@ -534,20 +572,92 @@ static int isLUKS2(const char *type)
 	return (type && !strcmp(type, CRYPT_LUKS2));
 }
 
+static int luks2_metadata_copy(struct reenc_ctx *rc)
+{
+	const char *json, *type;
+	crypt_token_info ti;
+	uint32_t flags;
+	int i, r = -EINVAL;
+	struct crypt_device *cd_old = NULL, *cd_new = NULL;
+
+	if (crypt_init(&cd_old, rc->header_file_tmp) ||
+	    crypt_load(cd_old, CRYPT_LUKS2, NULL))
+		goto out;
+
+	if (crypt_init(&cd_new, rc->header_file_new) ||
+	    crypt_load(cd_new, CRYPT_LUKS2, NULL))
+		goto out;
+
+	/*
+	 * we have to erase keyslots missing in new header so that we can
+	 * transfer tokens from old header to new one
+	 */
+	for (i = 0; i < crypt_keyslot_max(CRYPT_LUKS2); i++)
+		if (!rc->p[i].password && crypt_keyslot_status(cd_old, i) == CRYPT_SLOT_ACTIVE) {
+			r = crypt_keyslot_destroy(cd_old, i);
+			if (r < 0)
+				goto out;
+		}
+
+	for (i = 0; i < MAX_TOKEN; i++) {
+		ti = crypt_token_status(cd_old, i, &type);
+		switch (ti) {
+		case CRYPT_TOKEN_INVALID:
+			log_dbg("Internal error.");
+			r = -EINVAL;
+			goto out;
+		case CRYPT_TOKEN_INACTIVE:
+			break;
+		case CRYPT_TOKEN_INTERNAL_UNKNOWN:
+			log_err(_("This version of cryptsetup-reencrypt can't handle new internal token type %s.\n"), type);
+			r = -EINVAL;
+			goto out;
+		case CRYPT_TOKEN_INTERNAL:
+			/* fallthrough */
+		case CRYPT_TOKEN_EXTERNAL:
+			/* fallthrough */
+		case CRYPT_TOKEN_EXTERNAL_UNKNOWN:
+			if (crypt_token_json_get(cd_old, i, &json) != i) {
+				log_dbg("Failed to get %s token (%d).", type, i);
+				r = -EINVAL;
+				goto out;
+			}
+			if (crypt_token_json_set(cd_new, i, json) != i) {
+				log_dbg("Failed to create %s token (%d).", type, i);
+				r = -EINVAL;
+				goto out;
+			}
+		}
+	}
+
+	if ((r = crypt_persistent_flags_get(cd_old, CRYPT_FLAGS_ACTIVATION, &flags))) {
+		log_err(_("Failed to read activation flags from backup header.\n"));
+		goto out;
+	}
+	if ((r = crypt_persistent_flags_set(cd_new, CRYPT_FLAGS_ACTIVATION, flags))) {
+		log_err(_("Failed to write activation flags to new header.\n"));
+		goto out;
+	}
+	if ((r = crypt_persistent_flags_get(cd_old, CRYPT_FLAGS_REQUIREMENTS, &flags))) {
+		log_err(_("Failed to read requirements from backup header.\n"));
+		goto out;
+	}
+	if ((r = crypt_persistent_flags_set(cd_new, CRYPT_FLAGS_REQUIREMENTS, flags)))
+		log_err(_("Failed to read requirements from backup header.\n"));
+out:
+	crypt_free(cd_old);
+	crypt_free(cd_new);
+	unlink(rc->header_file_tmp);
+
+	return r;
+}
+
 static int backup_luks_headers(struct reenc_ctx *rc)
 {
 	struct crypt_device *cd = NULL;
 	struct crypt_params_luks1 params = {0};
-	const struct crypt_pbkdf_type luks2_pbkdf = {
-		.type = DEFAULT_LUKS2_PBKDF,
-		.hash = opt_hash ?: DEFAULT_LUKS1_HASH,
-		.time_ms = DEFAULT_LUKS2_ITER_TIME,
-		.max_memory_kb = DEFAULT_LUKS2_MEMORY_KB,
-		.parallel_threads = DEFAULT_LUKS2_PARALLEL_THREADS
-	};
-	struct crypt_params_luks2 params2 = {
-		.pbkdf = &luks2_pbkdf,
-	};
+	struct crypt_params_luks2 params2 = {0};
+	struct stat st;
 	char cipher [MAX_CIPHER_LEN], cipher_mode[MAX_CIPHER_LEN];
 	char *old_key = NULL;
 	size_t old_key_size;
@@ -561,6 +671,14 @@ static int backup_luks_headers(struct reenc_ctx *rc)
 
 	if ((r = crypt_header_backup(cd, CRYPT_LUKS, rc->header_file_org)))
 		goto out;
+	if (isLUKS2(rc->type)) {
+		if ((r = crypt_header_backup(cd, CRYPT_LUKS2, rc->header_file_tmp)))
+			goto out;
+		if ((r = stat(rc->header_file_tmp, &st)))
+			goto out;
+		if ((r = chmod(rc->header_file_tmp, st.st_mode | S_IWUSR)))
+			goto out;
+	}
 	log_verbose(_("%s header backup of device %s created.\n"), rc->device, isLUKS2(rc->type) ? "LUKS2" : "LUKS1");
 
 	/* For decrypt, new header will be fake one, so we are done here. */
@@ -600,9 +718,6 @@ static int backup_luks_headers(struct reenc_ctx *rc)
 			goto out;
 	}
 
-	if (isLUKS2(rc->type) && !opt_batch_mode)
-		log_std(_("Using default pbkdf parameters for new LUKS2 header.\n"));
-
 	r = create_new_header(rc,
 		opt_cipher ? cipher : crypt_get_cipher(cd),
 		opt_cipher ? cipher_mode : crypt_get_cipher_mode(cd),
@@ -611,6 +726,9 @@ static int backup_luks_headers(struct reenc_ctx *rc)
 		opt_key_size ? opt_key_size / 8 : crypt_get_volume_key_size(cd),
 		rc->type,
 		isLUKS2(rc->type) ? (void*)&params2 : (void*)&params);
+
+	if (!r && isLUKS2(rc->type))
+		r = luks2_metadata_copy(rc);
 out:
 	crypt_free(cd);
 	crypt_safe_free(old_key);
@@ -1182,6 +1300,7 @@ static int initialize_context(struct reenc_ctx *rc, const char *device)
 
 	rc->log_fd = -1;
 
+	/* FIXME: replace MAX_KEYSLOT with crypt_keyslot_max(CRYPT_LUKS2) */
 	if (crypt_keyslot_max(CRYPT_LUKS2) > MAX_SLOT) {
 		log_dbg("Internal error");
 		return -EINVAL;
@@ -1198,6 +1317,12 @@ static int initialize_context(struct reenc_ctx *rc, const char *device)
 		return -EINVAL;
 	}
 
+	if (opt_key_slot != CRYPT_ANY_SLOT &&
+	    opt_key_slot >= crypt_keyslot_max(rc->type)) {
+		log_err(_("Key slot is invalid.\n"));
+		return -EINVAL;
+	}
+
 	/* Prepare device names */
 	if (snprintf(rc->log_file, PATH_MAX,
 		     "LUKS-%s.log", rc->device_uuid) < 0)
@@ -1207,6 +1332,9 @@ static int initialize_context(struct reenc_ctx *rc, const char *device)
 		return -ENOMEM;
 	if (snprintf(rc->header_file_new, PATH_MAX,
 		     "LUKS-%s.new", rc->device_uuid) < 0)
+		return -ENOMEM;
+	if (snprintf(rc->header_file_tmp, PATH_MAX,
+		     "LUKS-%s.tmp", rc->device_uuid) < 0)
 		return -ENOMEM;
 
 	/* Paths to encrypted devices */
@@ -1262,6 +1390,7 @@ static void destroy_context(struct reenc_ctx *rc)
 		unlink(rc->log_file);
 		unlink(rc->header_file_org);
 		unlink(rc->header_file_new);
+		unlink(rc->header_file_tmp);
 	}
 
 	for (i = 0; i < MAX_SLOT; i++)
@@ -1269,6 +1398,48 @@ static void destroy_context(struct reenc_ctx *rc)
 
 	free(rc->device);
 	free(rc->device_uuid);
+}
+
+static int luks2_change_pbkdf_params(struct reenc_ctx *rc)
+{
+	int i, r;
+	struct crypt_device *cd;
+
+	if ((r = initialize_passphrase(rc, rc->device)))
+		return r;
+
+	if (crypt_init(&cd, rc->device) ||
+	    crypt_load(cd, CRYPT_LUKS2, NULL))
+		return -EINVAL;
+
+	if ((r = set_pbkdf_params(cd, CRYPT_LUKS2)))
+		goto out;
+
+	log_dbg("LUKS2 keyslot pbkdf params change.");
+
+	r = -EINVAL;
+
+	for (i = 0; i < crypt_keyslot_max(CRYPT_LUKS2); i++) {
+		if (!rc->p[i].password)
+			continue;
+		if ((r = crypt_keyslot_change_by_passphrase(cd, i, i,
+			rc->p[i].password, rc->p[i].passwordLen,
+			rc->p[i].password, rc->p[i].passwordLen)) < 0)
+			goto out;
+		log_verbose(_("Changed pbkdf parameters in keyslot %i.\n"), r);
+		r = 0;
+	}
+
+	if (r)
+		goto out;
+
+	/* see create_new_header */
+	for (i = 0; i < crypt_keyslot_max(CRYPT_LUKS2); i++)
+		if (!rc->p[i].password)
+			(void)crypt_keyslot_destroy(cd, i);
+out:
+	crypt_free(cd);
+	return r;
 }
 
 static int run_reencrypt(const char *device)
@@ -1280,6 +1451,12 @@ static int run_reencrypt(const char *device)
 
 	if (initialize_context(&rc, device))
 		goto out;
+
+	/* short-circuit LUKS2 keyslot parameters change */
+	if (opt_keep_key && isLUKS2(rc.type)) {
+		r = luks2_change_pbkdf_params(&rc);
+		goto out;
+	}
 
 	log_dbg("Running reencryption.");
 
@@ -1377,6 +1554,10 @@ int main(int argc, const char **argv)
 		{ "decrypt",           '\0', POPT_ARG_NONE, &opt_decrypt,               0, N_("Permanently decrypt device (remove encryption)."), NULL },
 		{ "uuid",              '\0', POPT_ARG_STRING, &opt_uuid,                0, N_("The uuid used to resume decryption."), NULL },
 		{ "type",              '\0', POPT_ARG_STRING, &opt_type,                0, N_("Type of LUKS metadata (luks1 or luks2)."), NULL },
+		{ "pbkdf",             '\0', POPT_ARG_STRING, &opt_pbkdf,               0, N_("PBKDF algorithm (for LUKS2) (argon2i/argon2id/pbkdf2)."), NULL },
+		{ "pbkdf-memory",      '\0', POPT_ARG_LONG, &opt_pbkdf_memory,          0, N_("PBKDF memory cost limit"), N_("kilobytes") },
+		{ "pbkdf-parallel",    '\0', POPT_ARG_LONG, &opt_pbkdf_parallel,        0, N_("PBKDF parallel cost "), N_("threads") },
+		{ "pbkdf-force-iterations",'\0',POPT_ARG_LONG, &opt_pbkdf_iterations,   0, N_("PBKDF iterations cost (forced, disables benchmark)"), NULL },
 		POPT_TABLEEND
 	};
 	poptContext popt_context;
@@ -1406,8 +1587,10 @@ int main(int argc, const char **argv)
 	}
 
 	if (!opt_batch_mode)
-		log_verbose(_("Reencryption will change: volume key%s%s%s%s.\n"),
-			opt_hash   ? _(", set hash to ")  : "", opt_hash   ?: "",
+		log_verbose(_("Reencryption will change: %s%s%s%s%s%s.\n"),
+			opt_keep_key ? "" :  _("volume key"),
+			(!opt_keep_key && opt_hash) ? ", " : "",
+			opt_hash   ? _("set hash to ")    : "", opt_hash   ?: "",
 			opt_cipher ? _(", set cipher to "): "", opt_cipher ?: "");
 
 	action_argv = poptGetArgs(popt_context);
@@ -1420,11 +1603,23 @@ int main(int argc, const char **argv)
 		      poptGetInvocationName(popt_context));
 
 	if (opt_bsize < 0 || opt_key_size < 0 || opt_iteration_time < 0 ||
-	    opt_tries < 0 || opt_keyfile_offset < 0 || opt_key_size < 0) {
+	    opt_tries < 0 || opt_keyfile_offset < 0 || opt_key_size < 0 ||
+	    opt_pbkdf_iterations < 0 || opt_pbkdf_memory < 0 ||
+	    opt_pbkdf_parallel < 0) {
 		usage(popt_context, EXIT_FAILURE,
 		      _("Negative number for option not permitted."),
 		      poptGetInvocationName(popt_context));
 	}
+
+	if (opt_pbkdf && crypt_parse_pbkdf(opt_pbkdf, &opt_pbkdf))
+		usage(popt_context, EXIT_FAILURE,
+		_("Password-based key derivation function (PBKDF) can be only pbkdf2 or argon2i/argon2id.\n"),
+		poptGetInvocationName(popt_context));
+
+	if (opt_pbkdf_iterations && opt_iteration_time)
+		usage(popt_context, EXIT_FAILURE,
+		_("PBKDF forced iterations cannot be combined with iteration time option.\n"),
+		poptGetInvocationName(popt_context));
 
 	if (opt_bsize < 1 || opt_bsize > 64)
 		usage(popt_context, EXIT_FAILURE,
@@ -1437,7 +1632,7 @@ int main(int argc, const char **argv)
 		      poptGetInvocationName(popt_context));
 
 	if (opt_key_slot != CRYPT_ANY_SLOT &&
-	    (opt_key_slot < 0 || opt_key_slot >= crypt_keyslot_max(CRYPT_LUKS1)))
+	    (opt_key_slot < 0 || opt_key_slot >= crypt_keyslot_max(CRYPT_LUKS2)))
 		usage(popt_context, EXIT_FAILURE, _("Key slot is invalid."),
 		      poptGetInvocationName(popt_context));
 
@@ -1465,8 +1660,8 @@ int main(int argc, const char **argv)
 		usage(popt_context, EXIT_FAILURE, _("Option --new must be used together with --reduce-device-size."),
 		      poptGetInvocationName(popt_context));
 
-	if (opt_keep_key && ((!opt_hash && !opt_iteration_time) || opt_cipher || opt_new))
-		usage(popt_context, EXIT_FAILURE, _("Option --keep-key can be used only with --hash or --iter-time."),
+	if (opt_keep_key && ((!opt_hash && !opt_iteration_time && !opt_pbkdf_iterations) || opt_cipher || opt_new))
+		usage(popt_context, EXIT_FAILURE, _("Option --keep-key can be used only with --hash, --iter-time or --pbkdf-force-iterations."),
 		      poptGetInvocationName(popt_context));
 
 	if (opt_new && opt_decrypt)

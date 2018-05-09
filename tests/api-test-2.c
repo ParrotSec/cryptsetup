@@ -392,7 +392,7 @@ static key_serial_t _kernel_key_by_segment(struct crypt_device *cd, int segment)
 
 static int _volume_key_in_keyring(struct crypt_device *cd, int segment)
 {
-	return _kernel_key_by_segment(cd, segment);
+	return _kernel_key_by_segment(cd, segment) >= 0 ? 0 : -1;
 }
 
 static int _drop_keyring_key(struct crypt_device *cd, int segment)
@@ -1456,6 +1456,12 @@ static void Tokens(void)
 #define BOGUS_TOKEN0_JSON "{\"type\":\"luks2-\",\"keyslots\":[]}"
 #define BOGUS_TOKEN1_JSON "{\"type\":\"luks2-a\",\"keyslots\":[]}"
 
+#define LUKS2_KEYRING_TOKEN_JSON(x, y) "{\"type\":\"luks2-keyring\",\"keyslots\":[" x "]," \
+			"\"key_description\":" y "}"
+
+#define LUKS2_KEYRING_TOKEN_JSON_BAD(x, y) "{\"type\":\"luks2-keyring\",\"keyslots\":[" x "]," \
+			"\"key_description\":" y ", \"some_field\":\"some_value\"}"
+
 	struct crypt_device *cd;
 
 	const char *dummy;
@@ -1544,13 +1550,25 @@ static void Tokens(void)
 	EQ_(crypt_activate_by_token(cd, CDEVICE_1, 2, PASSPHRASE, 0), 0);
 	OK_(crypt_deactivate(cd, CDEVICE_1));
 	EQ_(crypt_token_assign_keyslot(cd, 0, 1), 0);
+	OK_(crypt_token_is_assigned(cd, 0, 1));
 	EQ_(crypt_activate_by_token(cd, CDEVICE_1, 0, PASSPHRASE1, 0), 1);
 	OK_(crypt_deactivate(cd, CDEVICE_1));
 
 	EQ_(crypt_token_assign_keyslot(cd, 2, 3), 2);
+	OK_(crypt_token_is_assigned(cd, 2, 3));
 	EQ_(crypt_activate_by_token(cd, NULL, 2, PASSPHRASE, 0), 0);
 	EQ_(crypt_activate_by_token(cd, CDEVICE_1, 2, PASSPHRASE, 0), 0);
 	OK_(crypt_deactivate(cd, CDEVICE_1));
+
+#ifdef KERNEL_KEYRING
+	if (t_dm_crypt_keyring_support()) {
+		EQ_(crypt_activate_by_token(cd, NULL, 2, PASSPHRASE, CRYPT_ACTIVATE_KEYRING_KEY), 0);
+		OK_(_volume_key_in_keyring(cd, 0));
+	}
+	OK_(crypt_volume_key_keyring(cd, 0));
+#endif
+	FAIL_(crypt_activate_by_token(cd, NULL, 2, PASSPHRASE, CRYPT_ACTIVATE_KEYRING_KEY), "Can't use keyring when disabled in library");
+	OK_(crypt_volume_key_keyring(cd, 1));
 
 	EQ_(crypt_token_luks2_keyring_set(cd, 5, &params), 5);
 	EQ_(crypt_token_status(cd, 5, &dummy), CRYPT_TOKEN_INTERNAL);
@@ -1560,6 +1578,29 @@ static void Tokens(void)
 
 	FAIL_(crypt_token_json_set(cd, CRYPT_ANY_TOKEN, BOGUS_TOKEN0_JSON), "luks2- reserved prefix.");
 	FAIL_(crypt_token_json_set(cd, CRYPT_ANY_TOKEN, BOGUS_TOKEN1_JSON), "luks2- reserved prefix.");
+
+	// test we can use crypt_token_json_set for valid luks2-keyring token
+	FAIL_(crypt_token_json_set(cd, 12, LUKS2_KEYRING_TOKEN_JSON_BAD("\"0\"", "\"my_desc_x\"")), "Strict luks2-keyring token validation failed");
+	EQ_(crypt_token_status(cd, 12, NULL), CRYPT_TOKEN_INACTIVE);
+	FAIL_(crypt_token_json_set(cd, 12, LUKS2_KEYRING_TOKEN_JSON("\"5\"", "\"my_desc\"")), "Missing keyslot 5.");
+	EQ_(crypt_token_json_set(cd, 10, LUKS2_KEYRING_TOKEN_JSON("\"1\"", "\"my_desc\"")), 10);
+	EQ_(crypt_token_status(cd, 10, &dummy), CRYPT_TOKEN_INTERNAL);
+	OK_(strcmp(dummy, "luks2-keyring"));
+	params.key_description = NULL;
+	EQ_(crypt_token_luks2_keyring_get(cd, 10, &params), 10);
+	OK_(strcmp(params.key_description, "my_desc"));
+
+	OK_(crypt_token_is_assigned(cd, 10, 1));
+	// unassigned tests
+	EQ_(crypt_token_is_assigned(cd, 10, 21), -ENOENT);
+	EQ_(crypt_token_is_assigned(cd, 21, 1), -ENOENT);
+	// wrong keyslot or token id tests
+	EQ_(crypt_token_is_assigned(cd, -1, 1), -EINVAL);
+	EQ_(crypt_token_is_assigned(cd, 32, 1), -EINVAL);
+	EQ_(crypt_token_is_assigned(cd, 10, -1), -EINVAL);
+	EQ_(crypt_token_is_assigned(cd, 10, 32), -EINVAL);
+	EQ_(crypt_token_is_assigned(cd, -1, -1), -EINVAL);
+	EQ_(crypt_token_is_assigned(cd, 32, 32), -EINVAL);
 
 	crypt_free(cd);
 }
@@ -2657,6 +2698,11 @@ static void Luks2Requirements(void)
 	/* crypt_deactivate (unrestricted) */
 	OK_(crypt_deactivate(cd, CDEVICE_1));
 
+	/* crypt_token_is_assigned (unrestricted) */
+	OK_(crypt_token_is_assigned(cd, 1, 0));
+	OK_(crypt_token_is_assigned(cd, 6, 0));
+	EQ_(crypt_token_is_assigned(cd, 0, 0), -ENOENT);
+
 	/* crypt_keyslot_destroy (unrestricted) */
 	OK_(crypt_keyslot_destroy(cd, 0));
 
@@ -2701,6 +2747,34 @@ static void Luks2Integrity(void)
 	EQ_(32, ip.integrity_key_size);
 	EQ_(32+16, ip.tag_size);
 	OK_(crypt_deactivate(cd, CDEVICE_2));
+	crypt_free(cd);
+}
+
+static void Luks2Flags(void)
+{
+	struct crypt_device *cd;
+	uint32_t flags = 42;
+
+	OK_(crypt_init(&cd, DEVICE_1));
+	OK_(crypt_load(cd, CRYPT_LUKS2, NULL));
+
+	/* check library erase passed variable on success when no flags set */
+	OK_(crypt_persistent_flags_get(cd, CRYPT_FLAGS_ACTIVATION, &flags));
+	EQ_(flags, 0);
+
+	/* check set and get behave as expected */
+	flags = CRYPT_ACTIVATE_ALLOW_DISCARDS;
+	OK_(crypt_persistent_flags_set(cd, CRYPT_FLAGS_ACTIVATION, flags));
+	flags = 0;
+	OK_(crypt_persistent_flags_get(cd, CRYPT_FLAGS_ACTIVATION, &flags));
+	EQ_(flags, CRYPT_ACTIVATE_ALLOW_DISCARDS);
+
+	flags = CRYPT_ACTIVATE_ALLOW_DISCARDS | CRYPT_ACTIVATE_SUBMIT_FROM_CRYPT_CPUS;
+	OK_(crypt_persistent_flags_set(cd, CRYPT_FLAGS_ACTIVATION, flags));
+	flags = (uint32_t)~0;
+	OK_(crypt_persistent_flags_get(cd, CRYPT_FLAGS_ACTIVATION, &flags));
+	EQ_(flags,CRYPT_ACTIVATE_ALLOW_DISCARDS | CRYPT_ACTIVATE_SUBMIT_FROM_CRYPT_CPUS);
+
 	crypt_free(cd);
 }
 
@@ -2754,6 +2828,7 @@ int main(int argc, char *argv[])
 	RUN_(Luks2ActivateByKeyring, "Test LUKS2 activation by passphrase in keyring");
 	RUN_(Luks2Requirements, "Test LUKS2 requirements flags");
 	RUN_(Luks2Integrity, "Test LUKS2 with data integrity");
+	RUN_(Luks2Flags, "Test LUKS2 persistent flags");
 out:
 	_cleanup();
 	return 0;

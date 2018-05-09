@@ -900,6 +900,12 @@ if [ "$setup" = "yes" ]; then
 	copy_exec /sbin/dmsetup
 	copy_exec /lib/cryptsetup/askpass
 
+	# libargon2 utilizes pthread_cancel
+	LIBC_DIR="$(ldd /sbin/cryptsetup | sed -nr 's#.* => (/lib.*)/libc\.so\.[0-9.-]+ \(0x[[:xdigit:]]+\)$#\1#p')"
+	find -L "$LIBC_DIR" -maxdepth 1 -name 'libgcc_s.*' -type f | while read so; do
+		copy_exec "$so"
+	done
+
 	# We need sed. Either via busybox or as standalone binary.
 	if [ "$BUSYBOX" = "n" ] || [ ! -e ${BUSYBOXDIR}/busybox ]; then
 		copy_exec /bin/sed

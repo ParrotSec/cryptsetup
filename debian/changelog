@@ -1,3 +1,25 @@
+cryptsetup (2:2.0.2-1parrot0) testing; urgency=medium
+
+  * Import new Debian version.
+  * re-include kali nuke patch.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Wed, 09 May 2018 17:44:13 +0200
+
+cryptsetup (2:2.0.2-1) unstable; urgency=low
+
+  * New upstream release 2.0.2
+  * debian/initramfs/cryptroot-hook: copy libgcc_s.so.1 to the initrd, as
+    libargon2 (used by LUKS2 devices) uses pthread_cancel.  (Closes: #890798.)
+  * debian/initramfs/cryptroot-script: create locking directory at initramfs
+    stage, before running the cryptsetup binary, which would create it
+    automatically but also spew a warning.
+  * debian/patches/Fix-loopaesOpen-for-keyfile-on-standard-input.patch:
+    removed as it was cherry-picked from upstream and included in 2.0.2.
+  * debian/libcryptsetup12.symbols: update with new crypt_token_is_assigned()
+    API function.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sat, 17 Mar 2018 18:03:03 +0100
+
 cryptsetup (2:2.0.1-1parrot1) testing; urgency=medium
 
   * Non-maintainer upload.
