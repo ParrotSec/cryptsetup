@@ -1,0 +1,44 @@
+#!/bin/sh
+
+set -e
+
+PREREQ="cryptroot"
+
+prereqs()
+{
+    echo "$PREREQ"
+}
+
+case "$1" in
+    prereqs)
+        prereqs
+        exit 0
+        ;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+. /lib/cryptsetup/functions
+
+# Hooks for loading smartcard reading software into the initramfs
+crypttab_copy_keys_to_initramfs 'decrypt_opensc' || exit 1
+
+# Install directories needed by smartcard reading daemon, command, and
+# key-script
+mkdir -p "$DESTDIR/etc/opensc" "$DESTDIR/usr/lib/pcsc" "$DESTDIR/var/run" "$DESTDIR/tmp"
+
+# Install pcscd daemon, drivers, conf file, and include libgcc as well since
+# pcscd utilizes pthread_cancel
+copy_exec /usr/sbin/pcscd
+LIBC_DIR="$(ldd /usr/sbin/pcscd | sed -nr 's#.* => (/lib.*)/libc\.so\.[0-9.-]+ \(0x[[:xdigit:]]+\)$#\1#p')"
+find -L "$LIBC_DIR" -maxdepth 1 \( -name 'libgcc_s.*' -o -name 'libusb-*.so*' -o -name 'libpcsclite.so*' \) -type f | while read so; do
+    copy_exec "$so"
+done
+
+cp -r /usr/lib/pcsc "$DESTDIR/usr/lib"
+cp /etc/reader.conf "$DESTDIR/etc" || true
+cp /etc/libccid_Info.plist "$DESTDIR/etc"
+
+# Install opensc commands and conf file
+copy_exec /usr/bin/opensc-tool
+copy_exec /usr/bin/pkcs15-crypt
+cp /etc/opensc/opensc.conf "$DESTDIR/etc/opensc"

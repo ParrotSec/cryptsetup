@@ -17,6 +17,7 @@ libcryptsetup.so.12 libcryptsetup12 #MINVER#
  crypt_format@CRYPTSETUP_2.0 2:1.4
  crypt_free@CRYPTSETUP_2.0 2:1.4
  crypt_get_active_device@CRYPTSETUP_2.0 2:1.4
+ crypt_get_active_integrity_failures@CRYPTSETUP_2.0 2:2.0.3
  crypt_get_cipher@CRYPTSETUP_2.0 2:1.4
  crypt_get_cipher_mode@CRYPTSETUP_2.0 2:1.4
  crypt_get_data_offset@CRYPTSETUP_2.0 2:1.4
@@ -24,6 +25,7 @@ libcryptsetup.so.12 libcryptsetup12 #MINVER#
  crypt_get_dir@CRYPTSETUP_2.0 2:1.4
  crypt_get_integrity_info@CRYPTSETUP_2.0 2:2.0
  crypt_get_iv_offset@CRYPTSETUP_2.0 2:1.4
+ crypt_get_pbkdf_default@CRYPTSETUP_2.0 2:2.0.3
  crypt_get_pbkdf_type@CRYPTSETUP_2.0 2:2.0
  crypt_get_rng_type@CRYPTSETUP_2.0 2:1.4
  crypt_get_sector_size@CRYPTSETUP_2.0 2:2.0
@@ -46,6 +48,7 @@ libcryptsetup.so.12 libcryptsetup12 #MINVER#
  crypt_keyslot_area@CRYPTSETUP_2.0 2:1.6
  crypt_keyslot_change_by_passphrase@CRYPTSETUP_2.0 2:1.6
  crypt_keyslot_destroy@CRYPTSETUP_2.0 2:1.4
+ crypt_keyslot_get_key_size@CRYPTSETUP_2.0 2:2.0.3
  crypt_keyslot_get_priority@CRYPTSETUP_2.0 2:2.0
  crypt_keyslot_max@CRYPTSETUP_2.0 2:1.4
  crypt_keyslot_set_priority@CRYPTSETUP_2.0 2:2.0

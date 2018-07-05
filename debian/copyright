@@ -14,18 +14,15 @@ Copyright: © 2004-2005 Wesley W. Terpstra <terpstra@debian.org>
            © 2005-2006 Michael Gebetsroither <michael.geb@gmx.at>
            © 2006-2008 David Härdeman <david@hardeman.nu>
            © 2005-2015 Jonas Meurer <jonas@freesources.org>
+           © 2016-2018 Guilhem Moulin <guilhem@debian.org>
 License: GPL-2+
 
-Files: debian/askpass.c debian/passdev.c
+Files: debian/askpass.c debian/scripts/passdev.c
 Copyright: © 2008 David Härdeman <david@hardeman.nu>
 License: GPL-2+
 
 Files: debian/initramfs/cryptroot-unlock
-Copyright: © 2015 Guilhem Moulin <guilhem@debian.org>
-License: GPL-2+
-
-Files: debian/README.openct
-Copyright: © 2008 Daniel Baumann <baumann@swiss-it.ch>
+Copyright: © 2015-2018 Guilhem Moulin <guilhem@debian.org>
 License: GPL-2+
 
 Files: debian/README.opensc

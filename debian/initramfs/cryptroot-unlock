@@ -2,7 +2,7 @@
 
 # Remotely unlock encrypted volumes.
 #
-# Copyright © 2015-2017 Guilhem Moulin <guilhem@debian.org>
+# Copyright © 2015-2018 Guilhem Moulin <guilhem@debian.org>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,13 +25,15 @@ PASSFIFO=/lib/cryptsetup/passfifo
 ASKPASS=/lib/cryptsetup/askpass
 UNLOCK_ALL=n
 
-# The list of configured devices to unlock.
-# TODO refactor: this code should be shared with the cryptroot boot script
-if grep -qE '^(.*\s)?cryptopts=' /proc/cmdline; then
-	CRYPTDEVS=$(tr ' ' '\n' </proc/cmdline | sed -nr 's/^cryptopts=(.*,)?target=([^[:blank:],]+)(,.*)?$/\2/p')
-else
-	CRYPTDEVS=$(sed -nr 's/^(.*,)?target=([^[:blank:],]+)(,.*)?$/\2/p' /conf/conf.d/cryptroot)
+CRYPTTAB="/cryptroot/crypttab"
+if [ ! -f "$CRYPTTAB" ] || [ "$CRYPTTAB" -ot "/proc/1" ]; then
+	# Too early, init-top/cryptroot hasn't finished yet
+	echo "Try again later" >&2
+	exit 1
 fi
+
+# The list of configured devices to unlock.
+CRYPTDEVS="$(sed -nr 's/^\s*([^#[:blank:]]\S*)\s.*/\1/p' "$CRYPTTAB")"
 
 # Print the list of PIDs the executed command of which is $exe.
 pgrep_exe() {
@@ -113,22 +115,24 @@ wait_for_prompt() {
 	done
 
 	# find the cryptsetup process with same $CRYPTTAB_NAME
-	eval $(grep -Ez '^CRYPTTAB_(NAME|TRIED|SOURCE)=' "/proc/$pid/environ" | tr '\0' '\n')
+	CRYPTTAB_OPTION_tries=
+	eval $(grep -Ez '^CRYPTTAB_(NAME|TRIED|SOURCE|OPTION_tries)=' "/proc/$pid/environ" | tr '\0' '\n')
 	if ! is_device_known "$CRYPTTAB_NAME"; then
 		echo "Error: Refusing to process unknown device $CRYPTTAB_NAME" >&2
 		exit 1
 	fi
 
-	for pid in $(pgrep_exe '/sbin/cryptsetup'); do
+	for pid in $(pgrep_exe "/sbin/cryptsetup"); do
 		if grep -Fxqz "CRYPTTAB_NAME=$CRYPTTAB_NAME" "/proc/$pid/environ"; then
 			PID=$pid
 			BIRTH=$(stat -c'%Z' "/proc/$PID")
-			return 0;
+			return 0
 		fi
 	done
 
 	PID=
 	BIRTH=
+	return 1
 }
 
 # Wait until $PID no longer exists or has a birth date greater that
@@ -150,7 +154,7 @@ wait_for_answer() {
 	if [ -b "/dev/mapper/$CRYPTTAB_NAME" ]; then
 		echo "cryptsetup: $CRYPTTAB_NAME set up successfully" >&2
 		[ "$UNLOCK_ALL" = y ] && return 0 || exit 0
-	elif [ $CRYPTTAB_TRIED -ge 2 ]; then
+	elif [ $(( ${CRYPTTAB_TRIED:-0} + 1 )) -ge ${CRYPTTAB_OPTION_tries:-3} ]; then
 		echo "cryptsetup: maximum number of tries exceeded for $CRYPTTAB_NAME" >&2
 		exit 1
 	else
@@ -167,20 +171,17 @@ if [ -t 0 ] && [ -x "$ASKPASS" ]; then
 	while :; do
 		# note: if the script is not killed before pivot_root it should
 		# exit on its own once $TIMEOUT is reached
-		wait_for_prompt
-		diskname="$CRYPTTAB_NAME"
-		[ "${CRYPTTAB_SOURCE#/dev/disk/by-uuid/}" != "$CRYPTTAB_SOURCE" ] || diskname="$diskname ($CRYPTTAB_SOURCE)"
-		read -rs -p "Please unlock disk $diskname: "; echo
+		wait_for_prompt || continue
+		read -rs -p "Please unlock disk $CRYPTTAB_NAME: "; echo
 		printf '%s' "$REPLY" >"$PASSFIFO"
 		wait_for_answer || true
 	done
 else
 	# non-interactive mode: slurp the passphrase from stdin and exit
-	wait_for_prompt
-	diskname="$CRYPTTAB_NAME"
-	# TODO: refactor $CRYPTTAB_NAME/$CRYPTTAB_SOURCE to prompt mapping
-	[ "${CRYPTTAB_SOURCE#/dev/disk/by-uuid/}" != "$CRYPTTAB_SOURCE" ] || diskname="$diskname ($CRYPTTAB_SOURCE)"
-	echo "Please unlock disk $diskname"
+	wait_for_prompt || continue
+	echo "Please unlock disk $CRYPTTAB_NAME"
 	cat >"$PASSFIFO"
 	wait_for_answer || exit 1
 fi
+
+# vim: set filetype=sh :

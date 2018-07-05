@@ -42,13 +42,16 @@ Download
 --------
 All release tarballs and release notes are hosted on [kernel.org](https://www.kernel.org/pub/linux/utils/cryptsetup/).
 
-**The latest cryptsetup version is 2.0.1**
-  * [cryptsetup-2.0.1.tar.xz](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.1.tar.xz)
-  * Signature [cryptsetup-2.0.1.tar.sign](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.1.tar.sign)
+**The latest cryptsetup version is 2.0.2**
+  * [cryptsetup-2.0.2.tar.xz](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.2.tar.xz)
+  * Signature [cryptsetup-2.0.2.tar.sign](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.2.tar.sign)
     _(You need to decompress file first to check signature.)_
-  * [Cryptsetup 2.0.1 Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.1-ReleaseNotes).
+  * [Cryptsetup 2.0.2 Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.2-ReleaseNotes).
 
 Previous versions
+ * [Version 2.0.1](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.1.tar.xz) -
+   [Signature](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.1.tar.sign) -
+   [Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.1-ReleaseNotes).
  * [Version 2.0.0](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.0.tar.xz) -
    [Signature](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.0.tar.sign) -
    [Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.0-ReleaseNotes).
@@ -78,7 +81,7 @@ mirror on [kernel.org](https://git.kernel.org/cgit/utils/cryptsetup/cryptsetup.g
 
 For libcryptsetup documentation see [libcryptsetup API](https://gitlab.com/cryptsetup/cryptsetup/wikis/API/index.html) page.
 
-The libcryptsetup API/ABI changes are tracked in [compatibility report](https://gitlab.com/cryptsetup/cryptsetup/wikis/ABI-tracker/timeline/libcryptsetup/index.html).
+The libcryptsetup API/ABI changes are tracked in [compatibility report](https://abi-laboratory.pro/tracker/timeline/cryptsetup/).
 
 NLS PO files are maintained by [TranslationProject](http://translationproject.org/domain/cryptsetup.html).
 

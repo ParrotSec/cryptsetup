@@ -43,6 +43,7 @@
 #include "lib/utils_crypt.h"
 #include "lib/utils_loop.h"
 #include "lib/utils_fips.h"
+#include "lib/utils_io.h"
 
 #include "libcryptsetup.h"
 
@@ -87,6 +88,7 @@ int tools_get_key(const char *prompt,
 		  const char *key_file,
 		  int timeout, int verify, int pwquality,
 		  struct crypt_device *cd);
+void tools_passphrase_msg(int r);
 int tools_is_stdin(const char *key_file);
 int tools_string_to_size(struct crypt_device *cd, const char *s, uint64_t *size);
 int tools_is_cipher_null(const char *cipher);
@@ -96,6 +98,9 @@ void tools_clear_line(void);
 void tools_time_progress(uint64_t device_size, uint64_t bytes,
 			 struct timeval *start_time, struct timeval *end_time);
 int tools_wipe_progress(uint64_t size, uint64_t offset, void *usrptr);
+
+int tools_read_mk(const char *file, char **key, int keysize);
+int tools_write_mk(const char *file, const char *key, int keysize);
 
 /* Log */
 #define log_dbg(x...) clogger(NULL, CRYPT_LOG_DEBUG, __FILE__, __LINE__, x)

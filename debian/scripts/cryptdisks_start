@@ -9,40 +9,52 @@
 
 set -e
 
-if [ $# -lt 1 ]; then
-	echo "usage: $0 <name>" >&2
-	echo >&2
-	echo "reads /etc/crypttab and starts the mapping corresponding to <name>" >&2
-	exit 1
-fi
-
-. /lib/cryptsetup/cryptdisks.functions
+. /lib/cryptsetup/cryptdisks-functions
 
 INITSTATE="manual"
 DEFAULT_LOUD="yes"
+FORCE_START="yes"
 
-if [ -x "/usr/bin/id" ] && [ "$(/usr/bin/id -u)"  != "0" ]; then
-	log_warning_msg "$0 needs root privileges"
-	exit 1
+usage() {
+    local rv="${1:-1}"
+    echo "Usage: $0 [-r|--readonly] <name> [.. <name>]" >&2
+    echo >&2
+    echo "reads $TABFILE and starts the mapping corresponding to <name>" >&2
+    exit $rv
+}
+
+CRYPTTAB_EXTRA_OPTIONS=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -r|--readonly) CRYPTTAB_EXTRA_OPTIONS="${CRYPTTAB_EXTRA_OPTIONS:+$CRYPTTAB_EXTRA_OPTIONS,}readonly";;
+        -h|--help|-\?) usage 0;;
+        --) shift; break;;
+        -*) echo "Error: unknown option '$1'" >&2; usage 1;;
+        *) break;;
+    esac
+    shift
+done
+[ $# -gt 0 ] || usage 1
+
+if [ $(id -u) -ne 0 ]; then
+    log_warning_msg "$0 needs root privileges"
+    exit 1
 fi
 
 log_action_begin_msg "Starting crypto disk"
 mount_fs
 
-count=0
-tablen="$(egrep -vc "^[[:space:]]*(#|$)" "$TABFILE")"
-egrep -v "^[[:space:]]*(#|$)" "$TABFILE" | while read dst src key opts; do
-	count=$(( $count + 1 ))
-	if [ "$1" = "$dst" ]; then
-		ret=0
-		handle_crypttab_line_start "$dst" "$src" "$key" "$opts" <&3 || ret=$?
-	elif [ $count -ge $tablen ]; then
-		ret=1
-		device_msg "$1" "failed, not found in crypttab"
-	else
-		continue
-	fi
-	umount_fs
-	log_action_end_msg $ret
-	exit $ret
-done 3<&1
+rv=0
+for name in "$@"; do
+    if ! crypttab_find_target "$name"; then
+        device_msg "$name" "failed, not found in crypttab"
+        rv=1
+    else
+        CRYPTTAB_OPTIONS="$CRYPTTAB_OPTIONS${CRYPTTAB_EXTRA_OPTIONS:+,$CRYPTTAB_EXTRA_OPTIONS}"
+        setup_mapping "$CRYPTTAB_NAME" "$CRYPTTAB_SOURCE" "$CRYPTTAB_KEY" "$CRYPTTAB_OPTIONS" || rv=$?
+    fi
+done
+umount_fs
+
+log_action_end_msg $rv
+exit $rv

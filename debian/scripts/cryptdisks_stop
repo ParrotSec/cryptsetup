@@ -11,37 +11,34 @@
 set -e
 
 if [ $# -lt 1 ]; then
-	echo "usage: $0 <name>" >&2
-	echo >&2
-	echo "reads /etc/crypttab and stops the mapping corresponding to <name>" >&2
-	exit 1
+    echo "usage: $0 <name>" >&2
+    echo >&2
+    echo "reads /etc/crypttab and stops the mapping corresponding to <name>" >&2
+    exit 1
 fi
 
-. /lib/cryptsetup/cryptdisks.functions
+. /lib/cryptsetup/cryptdisks-functions
 
 INITSTATE="manual"
 DEFAULT_LOUD="yes"
 
-if [ -x "/usr/bin/id" ] && [ "$(/usr/bin/id -u)"  != "0" ]; then
-	log_warning_msg "$0 needs root privileges"
-	exit 1
+if [ $(id -u) -ne 0 ]; then
+    log_warning_msg "$0 needs root privileges"
+    exit 1
 fi
 
 log_action_begin_msg "Stopping crypto disk"
 
-count=0
-tablen="$(egrep -vc "^[[:space:]]*(#|$)" "$TABFILE")"
-egrep -v "^[[:space:]]*(#|$)" "$TABFILE" | while read dst src key opts; do
-	count=$(( $count + 1 ))
-	if [ "$1" = "$dst" ]; then
-		ret=0
-		handle_crypttab_line_stop "$dst" "$src" "$key" "$opts" <&3 || ret=$?
-	elif [ $count -ge $tablen ]; then
-		ret=1
-		device_msg "$1" "failed, not found in crypttab"
-	else
-		continue
-	fi
-	log_action_end_msg $ret
-	exit $ret
-done 3<&1
+rv=0
+for name in "$@"; do
+    if crypttab_find_target "$name"; then
+        remove_mapping "$CRYPTTAB_NAME" "$CRYPTTAB_OPTIONS" || rv=$?
+    elif cryptsetup status -- "$name" >/dev/null; then
+        remove_mapping "$name" '' || rv=$?
+    else
+        device_msg "$name" "failed, no such device"
+    fi
+done
+
+log_action_end_msg $rv
+exit $rv

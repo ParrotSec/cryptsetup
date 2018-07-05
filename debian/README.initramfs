@@ -69,12 +69,10 @@ Now, reboot the machine, and if everything is correctly configured, you
 should be given a prompt to type in the passphrase for the encrypted
 root partition before the boot can continue.
 
-NOTE: the initramfs scripts default to using the sha256 hash function while
-the plain cryptsetup binary defaults to using the ripemd160 hash function.
-In order to ensure that the crypto setup works in a consistent manner, you
-should make sure that the hash function is specified in the /etc/crypttab file
-if you are using regular dm-crypt (with LUKS the hash function to use is stored
-in the LUKS header).
+NOTE: In order to ensure that the crypto setup works in a consistent
+manner, you should make sure that the hash function is specified in the
+/etc/crypttab file if you are using regular dm-crypt (with LUKS the hash
+function to use is stored in the LUKS header).
 
 
 5. Setup (using LUKS)
@@ -130,6 +128,10 @@ one mapping needs to be setup in the initramfs stage of the boot.
 
 Example boot arguments:
 root=/dev/mapper/crypt0 cryptopts=target=crypt0,source=/dev/sda1,cipher=aes-xts-plain64,size=256,hash=sha1
+
+In particular, if all "cryptopts" boot arguments have an empty value
+then no mapping is setup.  This can be used to disable the cryptsetup
+initramfs scripts for a particular boot.
 
 8. Resume device support
 ------------------------

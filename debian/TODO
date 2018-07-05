@@ -1,9 +1,5 @@
 ## Post-Stretch
 
-* Restructure and clean up initramfs integration code
-* Idea: swap out basic functions into /lib/cryptsetup/functions and use
-  them both in initscript and in cryptroot hook/script? Anyway, code
-  deduplication is badly needed!
 * systemd is the default init system since stretch, and has its own
   logic for unlocking LUKS/dm-crypt devices.  However not all options
   (in particular keyscript=) in crypttab(5) are currently implemented,
@@ -20,29 +16,6 @@
   - After doing the above refactoring, we should add parent device detection
     for mdadm (#629236) and ZFS (#820888) so users don't have to manually add
     the 'initramfs' option to the crypttab.
-  - Variable naming is inconsistent. sometimes we use $device, sometimes $node.
-  - get_derived_device() should not be invoked by get_initramfs_devices().
-    Instead, add_device("$device") should care about such things.
-    In other words: first compile a list of device candidates according to the
-    source (root device, resume device, 'initramfs option', ...), then detect
-    possible dependencies (parent devices in case of lvm/btrfs/mdraid/...,
-    keyscripts like decrypt_derived, ...).
-  - In get_lvm_deps() the following should be replaced:
-    dmsetup table "$depnode" 2>/dev/null | cut -d' ' -f3)" != "crypt"
-    by
-    dmsetup info -c --noheadings -o subsystem "$depnode" != "CRYPT"
-  - Processing fstab and crypttab should be done in dedicated functions. At the
-    moment, crypttab is processed in different ways:
-    * get_initramfs_devices():
-	grep -s '^[^#]' /etc/crypttab | while read target source key options;
-    * get_device_opts():
-	opt="$( awk -vtarget="$target" '$1 == target {gsub(/[ \t]+/," "); print; exit}' /etc/crypttab )"
-	source=$( printf '%s' "$opt" | cut -d " " -f2 )
-	key=$( printf '%s' "$opt" | cut -d " " -f3 )
-	rootopts=$( printf '%s' "$opt" | cut -d " " -f4- )
-  - Variable name '$rootopts' in get_device_opts() is wrong now that we process
-    a lot more devices than just the root device in initramfs.
-  - Replace 'rootdev', 'resumedev', etc. flags by an option 'usage={root,resume,...}'
 * cryptroot local-top script:
   - Find a solution to run 'lvm vgchange' only after all lvm parent devices
     are unlocked. At the moment, ugly errors and warnings are shown in case

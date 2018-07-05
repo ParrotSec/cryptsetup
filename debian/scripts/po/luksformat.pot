@@ -7,7 +7,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
-"Report-Msgid-Bugs-To: pkg-cryptsetup-devel@lists.alioth.debian.org\n"
+"Report-Msgid-Bugs-To: pkg-cryptsetup-devel@alioth-lists.debian.net\n"
 "POT-Creation-Date: 2015-12-09 13:09+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"

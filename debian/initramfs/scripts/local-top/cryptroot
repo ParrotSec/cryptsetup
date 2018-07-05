@@ -1,0 +1,187 @@
+#!/bin/sh
+
+PREREQ="cryptroot-prepare"
+
+#
+# Standard initramfs preamble
+#
+prereqs()
+{
+	# Make sure that cryptroot is run last in local-top
+	local req
+	for req in "${0%/*}"/*; do
+		script="${req##*/}"
+		if [ "$script" != "${0##*/}" ]; then
+			printf '%s\n' "$script"
+		fi
+	done
+}
+
+case $1 in
+prereqs)
+	prereqs
+	exit 0
+	;;
+esac
+
+. /scripts/functions
+INITSTATE="initramfs"
+[ -f /lib/cryptsetup/functions ] || return 0
+. /lib/cryptsetup/functions
+
+
+# wait_for_source()
+#   Wait for encrypted $CRYPTTAB_SOURCE for up to 180s.  Set
+#   $CRYPTTAB_SOURCE to its normalized device name when it shows up;
+#   return 1 if timeout.
+wait_for_source() {
+    local device
+    wait_for_udev 10
+
+    if device="$(normalise_device --quiet "$CRYPTTAB_SOURCE")"; then
+        # the device is here already, no need to loop
+        CRYPTTAB_SOURCE="$device"
+        return 0
+    fi
+
+    # The lines below has been taken from
+    # /usr/share/initramfs-tools/scripts/local's local_device_setup(),
+    # as suggested per https://launchpad.net/bugs/164044
+
+    # If the source device hasn't shown up yet, give it a little while
+    # to allow for asynchronous device discovery (e.g. USB).
+
+    cryptsetup_message "Waiting for encrypted source device $CRYPTTAB_SOURCE..."
+
+    # Default delay is 180s, cf. initramfs-tools(8)
+    local slumber="${ROOTDELAY:-180}"
+    while [ $slumber -gt 0 ]; do
+        sleep 1
+
+        if [ -x /scripts/local-block/lvm2 ]; then
+            # activate any VG that might hold $CRYPTTAB_SOURCE
+            /scripts/local-block/lvm2 "$CRYPTTAB_SOURCE"
+        fi
+
+        if device="$(normalise_device --quiet "$CRYPTTAB_SOURCE")"; then
+            wait_for_udev 10
+            CRYPTTAB_SOURCE="$device"
+            return 0
+        fi
+
+        slumber=$(( $slumber - 1 ))
+    done
+    return 1
+}
+
+# setup_mapping($target, $source, $key, $options)
+#   Set up a given crypttab(5) mapping
+setup_mapping() {
+    export CRYPTTAB_NAME="$1" CRYPTTAB_SOURCE="$2" CRYPTTAB_OPTIONS="$4"
+    local key="$3"
+
+    # The same target can be specified multiple times
+    # e.g. root and resume lvs-on-lvm-on-crypto
+    if [ -e "/dev/mapper/$CRYPTTAB_NAME" ]; then
+        return 0
+    fi
+
+    crypttab_parse_options || return 1
+
+    if ! wait_for_source; then
+        # we've given up
+        if [ -n "$panic" ]; then
+            panic "ALERT! encrypted source device $CRYPTTAB_SOURCE does not exist, can't unlock $CRYPTTAB_NAME."
+        else
+            # let the user fix matters if they can
+            echo "	ALERT! encrypted source device $CRYPTTAB_SOURCE does not exist, can't unlock $CRYPTTAB_NAME."
+            echo "	Check cryptopts=source= bootarg: cat /proc/cmdline"
+            echo "	or missing modules, devices: cat /proc/modules; ls /dev"
+            panic "Dropping to a shell."
+        fi
+        return 1
+    fi
+
+    if [ -z "${CRYPTTAB_OPTION_keyscript+x}" ] && [ "${key#/FIXME-initramfs-rootmnt/}" != "$key" ]; then
+        # skip the mapping if the root FS is not mounted yet
+        sed -rn 's/^\s*[^#[:blank:]]\S*\s+(\S+)\s.*/\1/p' /proc/mounts | grep -Fxq -- "$rootmnt" || return 1
+        # substitute the "/FIXME-initramfs-rootmnt/" prefix by the real root FS mountpoint otherwise
+        key="$rootmnt/${key#/FIXME-initramfs-rootmnt/}"
+    fi
+
+    if [ -z "${CRYPTTAB_OPTION_keyscript+x}" ] && [ "$key" != "none" ]; then
+        if [ ! -e "$key" ]; then
+            cryptsetup_message "ERROR: Skipping target $CRYPTTAB_NAME: missing key file $key"
+            return 1
+        fi
+        # try only once if we have a key file
+        CRYPTTAB_OPTION_tries=1
+    fi
+
+    local count=0 maxtries="${CRYPTTAB_OPTION_tries:-3}" fstype vg rv
+    while [ $maxtries -le 0 ] || [ $count -lt $maxtries ]; do
+        if [ -z "${CRYPTTAB_OPTION_keyscript+x}" ] && [ "$key" != "none" ]; then
+            # unlock via keyfile
+            unlock_mapping "$key" "$CRYPTTAB_NAME"
+        else
+            # unlock interactively or via keyscript
+            run_keyscript "$key" "$count" | unlock_mapping - "$CRYPTTAB_NAME"
+        fi
+        rv=$?
+        count=$(( $count + 1 ))
+
+        if [ $rv -ne 0 ]; then
+            cryptsetup_message "ERROR: $CRYPTTAB_NAME: cryptsetup failed, bad password or options?"
+            sleep 1
+            continue
+        elif [ ! -e "/dev/mapper/$CRYPTTAB_NAME" ]; then
+            cryptsetup_message "ERROR: $CRYPTTAB_NAME: unknown error setting up device mapping"
+            return 1
+        fi
+
+        if ! fstype="$(get_fstype "/dev/mapper/$CRYPTTAB_NAME")" || [ "$fstype" = unknown ]; then
+            # bad password for plain dm-crypt device?  or mkfs not run yet?
+            cryptsetup_message "ERROR: $CRYPTTAB_NAME: unknown fstype, bad password or options?"
+            wait_for_udev 10
+            /sbin/cryptsetup remove -- "$CRYPTTAB_NAME"
+            sleep 1
+            continue
+        elif [ "$fstype" = lvm2 ]; then
+            if [ ! -x /sbin/lvm ]; then
+                cryptsetup_message "WARNING: $CRYPTTAB_NAME: lvm is not available"
+                return 1
+            elif vg="$(lvm pvs --noheadings -o vg_name --config 'log{prefix=""}' "/dev/mapper/$CRYPTTAB_NAME")"; then
+                # activate the VG held by the PV we just unlocked
+                lvm lvchange -a y --sysinit --ignoreskippedcluster -- "$vg"
+            fi
+        fi
+
+        cryptsetup_message "$CRYPTTAB_NAME: set up successfully"
+        wait_for_udev 10
+        return 0
+    done
+
+    cryptsetup_message "ERROR: $CRYPTTAB_NAME: maximum number of tries exceeded"
+    exit 1
+}
+
+
+#######################################################################
+# Begin real processing
+
+# Do we have any kernel boot arguments?
+gen_crypttab_from_kernel_cmdline
+
+# Do we have any settings from the /cryptroot/crypttab file?
+if [ -s /cryptroot/crypttab ]; then
+    # Create locking directory before invoking cryptsetup(8) to avoid warnings
+    mkdir -pm0700 /run/cryptsetup
+    modprobe -q dm_crypt
+
+    while read target source key options <&3; do
+        [ "${target#\#}" = "$target" ] || continue
+        setup_mapping "$target" "$source" "$key" "$options" 3<&-
+    done 3< /cryptroot/crypttab
+fi
+
+exit 0

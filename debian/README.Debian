@@ -167,19 +167,6 @@ The default check 'blkid' can check for any known filesystem type, as it uses
 blkid from util-linux. you can check for a particular filesystem by giving for
 example 'checkargs=ext4' or 'checkargs=swap' as an option in /etc/crypttab.
 
- The 'precheck' option is for configuring checks to be run against the source
-device before cryptsetup has been invoked. They are only available for plain
-cryptsetup devices. LUKS devices have a hardcoded precheck that uses the
-'isLuks' command of cryptsetup.
-As there is no way to check a device for plain cryptsetup data, you can only
-check for data that should not be on the device. for example the check could
-search for common filesystems on the device, and abort if it finds any.
-As this will never really ensure that no data is lost, the package doesn't
-provide such a check.
-Another example for a precheck could be to check the partition table id. For
-a device that shall be used as swap partition, it could verify that only
-partitions with type 'swap' (82) are used for encrypted swap.
-
  Please send us your checks, if you write new ones. If they are generally
 useful, we will include them in the package.
 

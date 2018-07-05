@@ -270,15 +270,22 @@ Prompts interactively for a passphrase if \-\-key-file is not given.
 .PP
 \fIluksAddKey\fR <device> [<key file with new key>]
 .IP
-adds a new passphrase. An existing passphrase must be supplied
+Adds a new passphrase. An existing passphrase must be supplied
 interactively or via \-\-key-file.
 The new passphrase to be added can be specified interactively
 or read from the file given as positional argument.
 
+\fBNOTE:\fR with \-\-unbound option the action creates new unbound
+LUKS2 keyslot. The keyslot cannot be used for device activation.
+If you don't pass new key via \-\-master\-key\-file option,
+new random key is generated. Existing passphrase for any active keyslot
+is not required.
+
 \fB<options>\fR can be [\-\-key\-file, \-\-keyfile\-offset,
 \-\-keyfile\-size, \-\-new\-keyfile\-offset,
 \-\-new\-keyfile\-size, \-\-key\-slot, \-\-master\-key\-file,
-\-\-iter\-time, \-\-force\-password, \-\-header, \-\-disable\-locks].
+\-\-iter\-time, \-\-force\-password, \-\-header, \-\-disable\-locks,
+\-\-unbound].
 .PP
 \fIluksRemoveKey\fR <device> [<key file with passphrase to be removed>]
 .IP
@@ -322,6 +329,30 @@ inaccessible.
 \-\-keyfile\-size, \-\-new\-keyfile\-offset,
 \-\-new\-keyfile\-size, \-\-key\-slot, \-\-force\-password, \-\-header,
 \-\-disable\-locks].
+.PP
+.PP
+\fIluksConvertKey\fR <device>
+.IP
+Converts an existing LUKS2 keyslot to new pbkdf parameters. The
+passphrase for keyslot to be converted must be supplied interactively
+or via \-\-key\-file. If no \-\-pbkdf parameters are specified LUKS2
+default pbkdf values will apply.
+
+If a keyslot is specified (via \-\-key\-slot), the passphrase for that
+keyslot must be given. If no keyslot is specified and there is still
+a free keyslot, then the new parameters will be put into a free
+keyslot before the keyslot containing the old parameters is
+purged. If there is no free keyslot, then the keyslot with the old
+parameters is overwritten directly.
+
+\fBWARNING:\fR If a keyslot is overwritten, a media failure during
+this operation can cause the overwrite to fail after the old
+parameters have been wiped and make the LUKS container inaccessible.
+
+\fB<options>\fR can be [\-\-key\-file, \-\-keyfile\-offset,
+\-\-keyfile\-size, \-\-key\-slot, \-\-header, \-\-disable\-locks,
+\-\-iter-time, \-\-pbkdf, \-\-pbkdf\-force\-iterations,
+\-\-pbkdf\-memory, \-\-pbkdf\-parallel].
 .PP
 \fIluksKillSlot\fR <device> <key slot number>
 .IP
@@ -374,17 +405,19 @@ means the device is a LUKS device.
 Dump the header information of a LUKS device.
 
 If the \-\-dump\-master\-key option is used, the LUKS device master key is
-dumped instead of the keyslot info. Beware that the master key cannot be
-changed and can be used to decrypt the data stored in the LUKS container
-without a passphrase and even without the LUKS header. This means
-that if the master key is compromised, the whole device has to be
-erased to prevent further access. Use this option carefully.
+dumped instead of the keyslot info. Together with \-\-master\-key\-file option,
+master key is dumped to a file instead of standard output. Beware that the
+master key cannot be changed without reencryption and can be used to decrypt
+the data stored in the LUKS container without a passphrase and even without the
+LUKS header. This means that if the master key is compromised, the whole device
+has to be erased to prevent further access. Use this option carefully.
 
 To dump the master key, a passphrase has to be supplied,
 either interactively or via \-\-key\-file.
 
 \fB<options>\fR can be [\-\-dump\-master\-key, \-\-key\-file,
-\-\-keyfile\-offset, \-\-keyfile\-size, \-\-header, \-\-disable\-locks].
+\-\-keyfile\-offset, \-\-keyfile\-size, \-\-header, \-\-disable\-locks,
+\-\-master\-key\-file].
 
 \fBWARNING:\fR If \-\-dump\-master\-key is used with \-\-key\-file
 and the argument to \-\-key\-file is '-', no validation question
@@ -539,7 +572,7 @@ value, \fBadditionally to \-\-veracrypt \fR use either the
 line or use \fB\-\-veracrypt\-query\-pim\fR to be prompted for the PIM.
 
 The PIM value affects the number of iterations applied during key derivation. Please refer to
-\fBhttps://www.veracrypt.fr/en/Personal%20Iterations%20Multiplier%20(PIM).html\fR
+\fBhttps://www.veracrypt.fr/en/Personal%20Iterations%20Multiplier%20%28PIM%29.html\fR
 for more detailed information.
 
 \fBNOTE:\fR Activation with \fBtcryptOpen\fR is supported only for cipher chains
@@ -769,6 +802,10 @@ master key. If the master key was taken from an existing
 LUKS header and all other parameters are the same,
 then the new header decrypts the data encrypted with the
 header the master key was taken from.
+
+Action \fIluksDump\fR together with \-\-dump\-master\-key
+option: The volume (master) key is stored in a file instead of
+being printed out to standard output.
 
 \fBWARNING:\fR If you create your own master key, you
 need to make sure to do it right. Otherwise, you can end
@@ -1135,6 +1172,11 @@ to the sector.
 \fBNOTE:\fR Even some writes to the device can fail if the write is not
 aligned to page size and page-cache initiates read of a sector with invalid
 integrity tag.
+.TP
+.B "\-\-unbound"
+
+Creates new LUKS2 unbound keyslot. See \fIluksAddKey\fR action for more
+details.
 .TP
 .B "\-\-tcrypt\-hidden"
 .B "\-\-tcrypt\-system"

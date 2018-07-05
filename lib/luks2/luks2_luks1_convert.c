@@ -425,43 +425,47 @@ static int move_keyslot_areas(struct crypt_device *cd, off_t offset_from,
 {
 	struct device *device = crypt_metadata_device(cd);
 	void *buf = NULL;
-	int devfd = -1;
+	int r = -EIO, devfd = -1;
 
 	log_dbg("Moving keyslot areas of size %zu from %jd to %jd.",
 		buf_size, (intmax_t)offset_from, (intmax_t)offset_to);
 
-	// FIXME: export aligned_malloc from utils
 	if (posix_memalign(&buf, crypt_getpagesize(), buf_size))
 		return -ENOMEM;
 
 	devfd = device_open(device, O_RDWR);
 	if (devfd == -1) {
-		log_dbg("Cannot open device %s.", device_path(device));
 		free(buf);
 		return -EIO;
 	}
+
+	/* This can safely fail (for block devices). It only allocates space if it is possible. */
+	if (posix_fallocate(devfd, offset_to, buf_size))
+		log_dbg("Preallocation (fallocate) of new keyslot area not available.");
+
+	/* Try to read *new* area to check that area is there (trimmed backup). */
+	if (read_lseek_blockwise(devfd, device_block_size(device),
+				 device_alignment(device), buf, buf_size,
+				 offset_to)!= (ssize_t)buf_size)
+		goto out;
 
 	if (read_lseek_blockwise(devfd, device_block_size(device),
 				 device_alignment(device), buf, buf_size,
-				 offset_from)!= (ssize_t)buf_size) {
-		close(devfd);
-		free(buf);
-		return -EIO;
-	}
+				 offset_from)!= (ssize_t)buf_size)
+		goto out;
 
 	if (write_lseek_blockwise(devfd, device_block_size(device),
 				  device_alignment(device), buf, buf_size,
-				  offset_to) != (ssize_t)buf_size) {
-		close(devfd);
-		free(buf);
-		return -EIO;
-	}
+				  offset_to) != (ssize_t)buf_size)
+		goto out;
 
+	r = 0;
+out:
 	close(devfd);
 	crypt_memzero(buf, buf_size);
 	free(buf);
 
-	return 0;
+	return r;
 }
 
 static int luks_header_in_use(struct crypt_device *cd)
@@ -470,8 +474,38 @@ static int luks_header_in_use(struct crypt_device *cd)
 
 	r = lookup_dm_dev_by_uuid(crypt_get_uuid(cd), crypt_get_type(cd));
 	if (r < 0)
-		log_err(cd, _("Can not check status of device with uuid: %s.\n"), crypt_get_uuid(cd));
+		log_err(cd, _("Can not check status of device with uuid: %s."), crypt_get_uuid(cd));
 
+	return r;
+}
+
+/* Check if there is a luksmeta area (foreign metadata created by the luksmeta package) */
+static int luksmeta_header_present(struct crypt_device *cd, off_t luks1_size)
+{
+	static const uint8_t LM_MAGIC[] = { 'L', 'U', 'K', 'S', 'M', 'E', 'T', 'A' };
+	struct device *device = crypt_metadata_device(cd);
+	void *buf = NULL;
+	int devfd, r = 0;
+
+	if (posix_memalign(&buf, crypt_getpagesize(), sizeof(LM_MAGIC)))
+		return -ENOMEM;
+
+	devfd = device_open(device, O_RDONLY);
+	if (devfd == -1) {
+		free(buf);
+		return -EIO;
+	}
+
+	/* Note: we must not detect failure as problem here, header can be trimmed. */
+	if (read_lseek_blockwise(devfd, device_block_size(device), device_alignment(device),
+		buf, sizeof(LM_MAGIC), luks1_size) == (ssize_t)sizeof(LM_MAGIC) &&
+		!memcmp(LM_MAGIC, buf, sizeof(LM_MAGIC))) {
+			log_err(cd, _("Unable to convert header with LUKSMETA additional metadata."));
+			r = -EBUSY;
+	}
+
+	close(devfd);
+	free(buf);
 	return r;
 }
 
@@ -488,6 +522,7 @@ int LUKS2_luks1_to_luks2(struct crypt_device *cd, struct luks_phdr *hdr1, struct
 		return r;
 
 	luks1_size = LUKS_device_sectors(hdr1) << SECTOR_SHIFT;
+	luks1_size = size_round_up(luks1_size, LUKS_ALIGN_KEYSLOTS);
 	if (!luks1_size)
 		return -EINVAL;
 
@@ -496,10 +531,13 @@ int LUKS2_luks1_to_luks2(struct crypt_device *cd, struct luks_phdr *hdr1, struct
 		return -EINVAL;
 	}
 
+	if (luksmeta_header_present(cd, luks1_size))
+		return -EINVAL;
+
 	log_dbg("Max size: %" PRIu64 ", LUKS1 (full) header size %zu , required shift: %zu",
 		max_size, luks1_size, luks1_shift);
 	if ((max_size - luks1_size) < luks1_shift) {
-		log_err(cd, _("Unable to move keyslot materials. Not enough space\n"));
+		log_err(cd, _("Unable to move keyslot area. Not enough space."));
 		return -EINVAL;
 	}
 
@@ -538,8 +576,10 @@ int LUKS2_luks1_to_luks2(struct crypt_device *cd, struct luks_phdr *hdr1, struct
 	// move keyslots 4k -> 32k offset
 	buf_offset = 2 * LUKS2_HDR_16K_LEN;
 	buf_size   = luks1_size - LUKS_ALIGN_KEYSLOTS;
-	if ((r = move_keyslot_areas(cd, 8 * SECTOR_SIZE, buf_offset, buf_size)) < 0)
+	if ((r = move_keyslot_areas(cd, 8 * SECTOR_SIZE, buf_offset, buf_size)) < 0) {
+		log_err(cd, _("Unable to move keyslot area."));
 		goto out;
+	}
 
 	// Write JSON hdr2
 	r = LUKS2_hdr_write(cd, hdr2);
@@ -582,6 +622,7 @@ static int keyslot_LUKS1_compatible(struct luks2_hdr *hdr, int keyslot, uint32_t
 		return 0;
 
 	/* FIXME: should this go to validation code instead (aka invalid luks2 header if assigned to segment 0)? */
+	/* FIXME: check all keyslots are assigned to segment id 0, and segments count == 1 */
 	ks_key_size = LUKS2_get_keyslot_key_size(hdr, keyslot);
 	if (ks_key_size < 0 || (int)key_size != LUKS2_get_keyslot_key_size(hdr, keyslot)) {
 		log_dbg("Key length in keyslot %d is different from volume key length", keyslot);
@@ -610,7 +651,6 @@ int LUKS2_luks2_to_luks1(struct crypt_device *cd, struct luks2_hdr *hdr2, struct
 	uint32_t key_size;
 	int i, r, last_active = 0;
 	uint64_t offset, area_length;
-	struct luks2_keyslot_params params;
 	char buf[256], luksMagic[] = LUKS_MAGIC;
 
 	jobj_digest  = LUKS2_get_digest_jobj(hdr2, 0);
@@ -625,37 +665,48 @@ int LUKS2_luks2_to_luks1(struct crypt_device *cd, struct luks2_hdr *hdr2, struct
 	if (!json_object_object_get_ex(jobj_digest, "type", &jobj2) ||
 	    strcmp(json_object_get_string(jobj2), "pbkdf2") ||
 	    json_object_object_length(jobj1) != 1) {
-		log_err(cd, _("Cannot convert to LUKS1 format - key slot digests are not LUKS1 compatible.\n"));
+		log_err(cd, _("Cannot convert to LUKS1 format - key slot digests are not LUKS1 compatible."));
 		return -EINVAL;
 	}
 
-	/* We really do not care about params later except keys_size */
-	r = LUKS2_keyslot_params_default(cd, hdr2, 0, &params);
+	r = crypt_parse_name_and_mode(LUKS2_get_cipher(hdr2, CRYPT_DEFAULT_SEGMENT), cipher, NULL, cipher_mode);
 	if (r < 0)
+		return r;
+
+	if (crypt_cipher_wrapped_key(cipher)) {
+		log_err(cd, _("Cannot convert to LUKS1 format - device uses wrapped key cipher %s."), cipher);
 		return -EINVAL;
+	}
+
+	r = LUKS2_tokens_count(hdr2);
+	if (r < 0)
+		return r;
+	if (r > 0) {
+		log_err(cd, _("Cannot convert to LUKS1 format - LUKS2 header contains %u token(s)."), r);
+		return -EINVAL;
+	}
 
 	r = LUKS2_get_volume_key_size(hdr2, 0);
 	if (r < 0)
 		return -EINVAL;
 	key_size = r;
-	params.area.raw.key_size = key_size;
 
 	for (i = 0; i < LUKS2_KEYSLOTS_MAX; i++) {
 		if (LUKS2_keyslot_info(hdr2, i) == CRYPT_SLOT_INACTIVE)
 			continue;
 
 		if (LUKS2_keyslot_info(hdr2, i) == CRYPT_SLOT_INVALID) {
-			log_err(cd, _("Cannot convert to LUKS1 format - keyslot %u is in invalid state.\n"), i);
+			log_err(cd, _("Cannot convert to LUKS1 format - keyslot %u is in invalid state."), i);
 			return -EINVAL;
 		}
 
 		if (i >= LUKS_NUMKEYS) {
-			log_err(cd, _("Cannot convert to LUKS1 format - slot %u (over maximum slots) is still active.\n"), i);
+			log_err(cd, _("Cannot convert to LUKS1 format - slot %u (over maximum slots) is still active."), i);
 			return -EINVAL;
 		}
 
 		if (!keyslot_LUKS1_compatible(hdr2, i, key_size)) {
-			log_err(cd, _("Cannot convert to LUKS1 format - keyslot %u is not LUKS1 compatible.\n"), i);
+			log_err(cd, _("Cannot convert to LUKS1 format - keyslot %u is not LUKS1 compatible."), i);
 			return -EINVAL;
 		}
 	}
@@ -677,8 +728,12 @@ int LUKS2_luks2_to_luks1(struct crypt_device *cd, struct luks2_hdr *hdr2, struct
 		} else {
 			if (LUKS2_find_area_gap(cd, hdr2, key_size, &offset, &area_length))
 				return -EINVAL;
-			/* FIXME: luks2 reload is required! */
-			if (luks2_keyslot_alloc(cd, i, key_size, &params))
+			/*
+			 * We have to create placeholder luks2 keyslots in place of all
+			 * inactive keyslots. Otherwise we would allocate all
+			 * inactive luks1 keyslots over same binary keyslot area.
+			 */
+			if (placeholder_keyslot_alloc(cd, i, offset, area_length, key_size))
 				return -EINVAL;
 		}
 
@@ -787,8 +842,10 @@ int LUKS2_luks2_to_luks1(struct crypt_device *cd, struct luks2_hdr *hdr2, struct
 	buf_offset = 2 * LUKS2_HDR_16K_LEN;
 	buf_size   = LUKS2_keyslots_size(hdr2->jobj);
 	r = move_keyslot_areas(cd, buf_offset, 8 * SECTOR_SIZE, buf_size);
-	if (r < 0)
+	if (r < 0) {
+		log_err(cd, _("Unable to move keyslot area."));
 		return r;
+	}
 
 	crypt_wipe_device(cd, crypt_metadata_device(cd), CRYPT_WIPE_ZERO, 0,
 			  8 * SECTOR_SIZE, 8 * SECTOR_SIZE, NULL, NULL);

@@ -77,6 +77,7 @@ CRYPTSETUP_2.0 {
 
 		crypt_get_type;
 		crypt_get_active_device;
+		crypt_get_active_integrity_failures;
 		crypt_persistent_flags_set;
 		crypt_persistent_flags_get;
 
@@ -84,10 +85,12 @@ CRYPTSETUP_2.0 {
 		crypt_get_rng_type;
 		crypt_set_pbkdf_type;
 		crypt_get_pbkdf_type;
+		crypt_get_pbkdf_default;
 
 		crypt_keyslot_max;
 		crypt_keyslot_area;
 		crypt_keyslot_status;
+		crypt_keyslot_get_key_size;
 		crypt_get_dir;
 		crypt_set_debug_level;
 		crypt_log;

@@ -23,7 +23,7 @@ update: luksformat.pot
 
 luksformat.pot: $(SOURCES)
 	$(XGETTEXT) -c -L Perl -kgtx \
-	--msgid-bugs-address=pkg-cryptsetup-devel@lists.alioth.debian.org \
+	--msgid-bugs-address=pkg-cryptsetup-devel@alioth-lists.debian.net \
 	-o $@ $(SOURCES)
 
 install: all

@@ -247,7 +247,18 @@ int crypt_set_pbkdf_type(struct crypt_device *cd,
 	 const struct crypt_pbkdf_type *pbkdf);
 
 /**
- * Get current default PBKDF (Password-Based Key Derivation Algorithm) for keyslots.
+ * Get default PBKDF (Password-Based Key Derivation Algorithm) settings for keyslots.
+ * Works only with LUKS device handles (both versions).
+ *
+ * @param type type of device (see @link crypt-type @endlink)
+ *
+ * @return struct on success or NULL value otherwise.
+ *
+ */
+const struct crypt_pbkdf_type *crypt_get_pbkdf_default(const char *type);
+
+/**
+ * Get current PBKDF (Password-Based Key Derivation Algorithm) settings for keyslots.
  * Works only with LUKS device handles (both versions).
  *
  * @param cd crypt device handle
@@ -851,6 +862,9 @@ int crypt_keyslot_add_by_volume_key(struct crypt_device *cd,
 /** create keyslot with volume key not associated with current dm-crypt segment */
 #define CRYPT_VOLUME_KEY_NO_SEGMENT (1 << 0)
 
+/** create keyslot with new volume key and assign it to current dm-crypt segment */
+#define CRYPT_VOLUME_KEY_SET (1 << 1)
+
 /**
  * Add key slot using provided key.
  *
@@ -867,10 +881,18 @@ int crypt_keyslot_add_by_volume_key(struct crypt_device *cd,
  * @return allocated key slot number or negative errno otherwise.
  *
  * @note in case volume_key is @e NULL following first matching rule will apply:
- * a) if cd is device handle used in crypt_format() by current process, the volume
- *    key generated (passed) to crypt_format() will be stored in keyslot.
- * b) if CRYPT_VOLUME_KEY_NO_SEGMENT flag is raised the new volume_key will be
- *    generated and stored in keyslot.
+ * @li if cd is device handle used in crypt_format() by current process, the volume
+ *     key generated (or passed) in crypt_format() will be stored in keyslot.
+ * @li if CRYPT_VOLUME_KEY_NO_SEGMENT flag is raised the new volume_key will be
+ *     generated and stored in keyslot. The keyslot will become unbound (unusable to
+ *     dm-crypt device activation).
+ * @li fails with -EINVAL otherwise
+ *
+ * @warning CRYPT_VOLUME_KEY_SET flag force updates volume key. It is @b not @b reencryption!
+ * 	    By doing so you will most probably destroy your ciphertext data device. It's supposed
+ * 	    to be used only in wrapped keys scheme for key refresh process where real (inner) volume
+ * 	    key stays untouched. It may be involed on active @e keyslot which makes the (previously
+ * 	    unbound) keyslot new regular keyslot.
  */
 int crypt_keyslot_add_by_key(struct crypt_device *cd,
 	int keyslot,
@@ -932,6 +954,10 @@ int crypt_keyslot_destroy(struct crypt_device *cd, int keyslot);
 #define CRYPT_ACTIVATE_RECOVERY (1 << 13)
 /** ignore persistently stored flags */
 #define CRYPT_ACTIVATE_IGNORE_PERSISTENT (1 << 14)
+/** dm-verity: check_at_most_once - check data blocks only the first time */
+#define CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE (1 << 15)
+/** allow activation check including unbound keyslots (kesylots without segments) */
+#define CRYPT_ACTIVATE_ALLOW_UNBOUND_KEY (1 << 16)
 
 /**
  * Active device runtime attributes
@@ -954,8 +980,20 @@ struct crypt_active_device {
  *
  */
 int crypt_get_active_device(struct crypt_device *cd,
-			    const char *name,
-			    struct crypt_active_device *cad);
+	const char *name,
+	struct crypt_active_device *cad);
+
+/**
+ * Get detected number of integrity failures.
+ *
+ * @param cd crypt device handle (can be @e NULL)
+ * @param name name of active device
+ *
+ * @return number of integrity failures or @e 0 otherwise
+ *
+ */
+uint64_t crypt_get_active_integrity_failures(struct crypt_device *cd,
+	const char *name);
 /** @} */
 
 /**
@@ -1413,8 +1451,10 @@ typedef enum {
 	CRYPT_SLOT_INVALID,    /**< invalid keyslot */
 	CRYPT_SLOT_INACTIVE,   /**< keyslot is inactive (free) */
 	CRYPT_SLOT_ACTIVE,     /**< keyslot is active (used) */
-	CRYPT_SLOT_ACTIVE_LAST /**< keylost is active (used)
+	CRYPT_SLOT_ACTIVE_LAST,/**< keylost is active (used)
 				 *  and last used at the same time */
+	CRYPT_SLOT_UNBOUND     /**< keyslot is active and not bound
+				 *  to any crypt segment (LUKS2 only) */
 } crypt_keyslot_info;
 
 /**
@@ -1484,6 +1524,18 @@ int crypt_keyslot_area(struct crypt_device *cd,
 	int keyslot,
 	uint64_t *offset,
 	uint64_t *length);
+
+/**
+ * Get size (in bytes) of key for particular keyslot.
+ * Use for LUKS2 unbound keyslots, for other keyslots it is the same as @ref crypt_get_volume_key_size
+ *
+ * @param cd crypt device handle
+ * @param keyslot keyslot number
+ *
+ * @return volume key size or negative errno value otherwise.
+ *
+ */
+int crypt_keyslot_get_key_size(struct crypt_device *cd, int keyslot);
 
 /**
  * Get directory where mapped crypt devices are created

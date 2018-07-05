@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: cryptsetup VERSION\n"
 "Report-Msgid-Bugs-To: cryptsetup@packages.debian.org\n"
-"POT-Creation-Date: 2011-09-15 12:30+0200\n"
+"POT-Creation-Date: 2018-06-18 01:42+0200\n"
 "PO-Revision-Date: 2016-08-22 20:21+0700\n"
 "Last-Translator: Izharul Haq <atoz.chevara@yahoo.com>\n"
 "Language-Team: L10N Debian Indonesian <debian-l10n-indonesian@lists.debian."
@@ -22,19 +22,19 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../cryptsetup.templates:1001
+#: ../cryptsetup-run.templates:1001
 msgid "Continue with cryptsetup removal?"
 msgstr "Lanjutkan dengan penghapusan cryptsetup?"
 
 #. Type: boolean
 #. Description
-#: ../cryptsetup.templates:1001
+#: ../cryptsetup-run.templates:1001
 msgid "This system has unlocked dm-crypt devices: ${cryptmap}"
 msgstr "Sistem ini telah membuka perangkat dm-crypt: ${cryptmap}"
 
 #. Type: boolean
 #. Description
-#: ../cryptsetup.templates:1001
+#: ../cryptsetup-run.templates:1001
 msgid ""
 "If these devices are managed with cryptsetup, you might be unable to lock "
 "the devices after the package removal, though other tools can be used for "
@@ -48,7 +48,7 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../cryptsetup.templates:1001
+#: ../cryptsetup-run.templates:1001
 msgid ""
 "Do not choose this option if you want to lock the dm-crypt devices before "
 "package removal."

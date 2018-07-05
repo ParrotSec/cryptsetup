@@ -1,9 +1,217 @@
-cryptsetup (2:2.0.2-1parrot0) testing; urgency=medium
+cryptsetup (2:2.0.3-4kali1) kali-dev; urgency=medium
 
-  * Import new Debian version.
-  * re-include kali nuke patch.
+  * Synchronize with Debian. Remaining changes:
+    - add debian/patches/cryptsetup_nuke_keys.patch to nuke decryption keys
+      with special passphrase
 
- -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Wed, 09 May 2018 17:44:13 +0200
+ -- Sophie Brun <sophie@freexian.com>  Thu, 05 Jul 2018 14:49:03 +0200
+
+cryptsetup (2:2.0.3-4) unstable; urgency=low
+
+  * debian/initramfs/hooks/cryptroot:
+    + Fix typo in warning message. (Closes: #901971.)
+    + sysfs_devdir(): don't croak when the normalized device pathname isn't of
+      the form /dev/$blk.  This is the case in the Debian installer, where the
+      devtmpfs pseudo-filesystem exposes /dev/mapper/$name as a block device
+      instead of a symlink to /dev/dm-$index.
+    + sysfs_devdir(): return /sys/dev/block/$maj:$min (a symlink pointing the
+      sysfs directory corresponding to the device) rather than /sys/block/$blk.
+      While the latter is present for mapped devices, it's not present for
+      block devices corresponding to disk partitions.  See sysfs(5) for
+      details. (Closes: #902183.)
+    + get_crypttab_entry(): skip (harmless) warning if blkid_tag() fails to
+      get the UUID of a dm-crypt device's slave (it's normal with plain
+      dm-crypt devices).
+    + get_crypttab_entry(): don't warn that key file doesn't exist if it's
+      e.g., an existing character special device.
+  * debian/functions:unlock_mapping(): translate crypttab(5) option
+    'size=<size>' to `cryptsetup --key-size=<size>`, not `--size` (which
+    doesn't set the key size but the size of the device in number of 512 byte
+    sectors).  Regression since 2:2.0.3-2. (Closes: #902245.)
+  * debian/initramfs/scripts/local-top/cryptroot, debian/cryptdisks-functions,
+    debian/initramfs/cryptroot-unlock: Fix off-by-one unlock count.  Some
+    keyscripts (such as decrypt_keyctl) don't work properly if on first try
+    the CRYPTTAB_TRIED environment variable isn't set to 0.  Regression since
+    2:2.0.3-2. (Closes: #902116.)
+  * debian/scripts/decrypt_keyctl: replace the source device path with the
+    mapped device name in messages, to match the new askpass behavior.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sun, 24 Jun 2018 22:48:41 +0200
+
+cryptsetup (2:2.0.3-3) unstable; urgency=low
+
+  [ Jonas Meurer ]
+  * debian/*: run wrap-and-sort(1)
+  * debian/control:
+    + Add Conflicts and Breaks on 'cryptsetup-bin (<< 2:2.0.3-2)' to
+      cryptsetup-run. Needed since we moved luksformat between the
+      packages. (Closes: #901773)
+    + Remove all traces of package 'cryptsetup-luks' from dependency
+      headers. This package has never been part of an official Debian
+      release and the time it existed is more than 12 years ago.
+    + Remove Conflicts/Breaks headers from the split of cryptsetup into
+      cryptsetup/cryptsetup-bin in release 2:1.4.1-3. The conflicting
+      version is from Debian Wheezy, which means that there's three
+      releases in between. We don't support dist-upgrades with skipped
+      releases anyway.
+    + Remove obsolete 'Breaks: hashalot (<< 0.3-2)' from cryptsetup-run.
+    + Remove versioned depends of libcryptsetup12 on libgcrypt20 and
+      libgpg-error0. Both versions are satisfied since more than three
+      releases.
+    + Remove versioned build-depends on docbook-xsl, dpkg-dev,
+      libdevmapper-dev, libgcrypt20-dev and libtool. All versions are
+      satisfied since more than three releases.
+  * debian/*: Change maintainer contact address to @alioth-lists.debian.net.
+
+  [ Guilhem Moulin ]
+  * debian/control: Replace 2:2.0.2-2 with 2:2.0.3-1 in Breaks/Replaces/Depends
+    fields.  (2:2.0.2-2 was never released, the version we released after the
+    package split was 2:2.0.3-1.)
+  * debian/initramfs/cryptroot-script: exit immediately when
+    /lib/cryptsetup/functions is not present. (Closes: #901830.)
+  * debian/cryptsetup-run.prerm: use `dmsetup table --target crypt` to avoid
+    manually excluding mapped devices using another subsystem.
+  * d/initramfs/hooks/cryptroot:
+    + Fix parser for cipher specifications in mapping table of crypt targets.
+      In particular, the cipher mode wasn't parsed properly, potentially
+      causing missing modules in initrd.img compiled with MODULES=dep.
+      Regression introduced in 2:2.0.3-2.  (Closes: #901884.)
+    + Print a warning when the mapping table specifies the cipher in kernel
+      crypto API format ("capi:" prefix).  We don't support these yet.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Wed, 20 Jun 2018 17:22:36 +0200
+
+cryptsetup (2:2.0.3-2) unstable; urgency=medium
+
+  The "nights are long in summer" cryptsetup sprint release :-)
+
+  Guilhem and Jonas hacked together for three days (and nights), refactored
+  almost all of the cryptsetup packages, squashed (at least) 19 bugs and
+  started work on several new features. Yay!
+
+  [ Guilhem Moulin ]
+  * cryptsetup-initramfs: Demote "Depends: console-setup, kbd" to Recommends:
+    (Closes: #901641.)
+  * debian/initramfs/*-hook: complete refactoring. Common functions are now in
+    /lib/cryptsetup/functions (source-able from shell scripts).
+    (Closes: #784881.)
+  * debian/initramfs/cryptroot-hook:
+    + Use sysfs(5) block (resp. fs) hierarchies to detect slave dm-crypt
+      devices such as LVM2 on top of LUKS (resp. multiple device filesystems
+      such as btrfs).  This approach is more robust than parsing the output of
+      `lvs` or `btrfs filesystem`.
+    + Export relevant crypttab(5) snippet (for devices that need to be
+      unlocked at initramfs stage) to the initramfs' /cryptroot/crypttab.
+    + Print a warning inviting the user to uninstall 'cryptsetup-initramfs'
+      if 1/ the CRYPTSETUP configuration option is unset or null (the
+      default), and 2/ the hook didn't detect any device to be unlocked at
+      initramfs stage.  The benefit is two-fold: it guides users through the
+      package split, and warns them that their system might not reboot if the
+      hook script didn't work properly.
+  * Remove the 'decrypt_openct' keyscript since openct was last seen in
+    oldoldstable, cf. #760258 (ROM).
+  * debian/initramfs/cryptroot-script: refactoring, using functions from
+    /lib/cryptsetup/functions. (Closes: #720952, #826124.)
+    + One can disable the cryptsetup initramfs scripts for a particular boot
+      by passing "cryptopts=" as kernel boot argument. (Closes: #873840.)
+    + No longer sleep for a full minute after exceeding the maximum number of
+      unlocking tries.  (This was added in 2:1.7.3-2 as an attempt to mitigate
+      CVE-2016-4484.)  Instead, the script sleeps for 1 second after each failed
+      attempt in order to defeat online brute-force attacks. (Closes: #898495.)
+  * debian/README.initramfs: Remove mention that the initramfs scripts and the
+    crypsetup binary are using a different hash algorithm for plain dm-crypt
+    volumes.  This is no longer true since 2:1.0.6~pre1+svn45-1, cf. #406317.
+  * debian/cryptdisks.functions:
+    + Refactoring, using functions from /lib/cryptsetup/functions.
+      (Closes: #859953, #891219.)
+    + Install to /lib/cryptsetup/cryptdisks-functions.
+  * crypttab(5):
+    + Remove support for the 'precheck' option.  The precheck for LUKS devices
+      is still hardcoded to `cryptsetup isLuks`; the script refuses to unlock
+      non-LUKS devices (plain dm-crypt and tcrypt devices) containing a known
+      filesystem (other that swap).
+    + Don't ignore the 'plain' option: disable auto-detection and treat the
+      device as a plain dm-crypt device. (Closes: #886007.)
+    + Add support for some option aliases to unify with systemd's crypttab(5)
+      options.  Namely, 'read-only' is an alias for 'readonly', 'key-slot=' is
+      an alias for 'keyslot=', 'tcrypt-hidden' is an alias for 'tcrypthidden',
+      and 'tcrypt-veracrypt' is an alias for 'veracrypt'.
+    + Add support for 'keyfile-size=' and 'keyfile-offset=' options.
+      (Closes: #849335.)
+    + Source devices can now be specified using their PARTUUID or PARTLABEL,
+      similar to fstab(5).
+  * debian/scripts/cryptdisks_start: Add support for '-r'/'--readonly' switch
+    to setup readonly mappings. (Closes: #782843.)
+  * debian/scripts/cryptdisks_stop: Add support for closing multiple disks at
+    once.  (Closes: #783194.)
+
+  [ Jonas Meurer ]
+  * debian/doc/crypttab.xml:
+    + Add a section about the different crypttab formats of our package and
+      the systemd cryptsetup wrapper.
+    + Document, which options are ignored by the initramfs scripts and which
+      are unsupported by the systemd implementation. (Closes: #714380)
+    + Clarify documentation of option 'tries'. It also applies when using
+      keyscripts, not only with interactive passphrases. (Closes: #826127)
+    + Make it obvious that in case a keyscript is configured, the third option
+      is passed as argument to the keyscript. Mention the optional requirement
+      to quote the value. (Closes: #826122)
+    + Some minor wording improvements.
+  * debian/control, debian/combat: Bump debhelper compatibility level to 11.
+  * debian/rules:
+    + Completely refactor the rules file, adapt to debhelper 11 style.
+      (Closes: #901713)
+    + Run the upstream build-time testsuite thanks to dh_auto_test.
+    + Move the luksformat script from cryptsetup-bin to cryptsetup-run.
+    + Install the bug-script into all packages.
+    + No longer install the sysvinit initscripts into cryptsetup-udeb.
+    + Remove many old build and compile flags, debhelper takes care of most of
+      them nowadays.
+
+ -- Jonas Meurer <jonas@freesources.org>  Mon, 18 Jun 2018 02:40:41 +0200
+
+cryptsetup (2:2.0.3-1) unstable; urgency=medium
+
+  [ Guilhem Moulin ]
+  * Split cryptsetup package into cryptsetup-run (init scripts and libraries)
+    and cryptsetup-initramfs (initramfs integration).  The 'cryptsetup'
+    package is now a transitional dummy package.  (Closes: #783297.)
+  * debian/cryptsetup-run.preinst: remove logic for rm_conffile
+    /etc/udev/rules.d/z60_cryptsetup.rules, which was added for #493151 in
+    2:1.0.6-5.
+  * debian/cryptdisks.bash_completion: only complete cryptdisks_stop arguments
+    with crypttab(5) targets that already exist, and only complete
+    cryptdisks_start targets with crypttab(5) targets that don't exist yet.
+    (Closes: #827200.)
+  * debian/initramfs/cryptroot-hook:
+    + use copy_file() from hook-functions to copy key files to the initrd.
+      This ensures that relevant messages are printed in verbose mode.
+      (Closes: #898516.)
+    + remove backward compatibility support for setting CRYPTSETUP and
+      KEYFILE_PATTERN in /etc/initramfs-tools/initramfs.conf.  Since 2:1.7.2-1
+      they should be set in /etc/cryptsetup-initramfs/conf-hook.
+    + add 'algif_skcipher' kernel module to large initramfs (if the MODULES
+      variable isn't "dep").  That module is required for unlocking LUKS2
+      devices.
+
+  [ Jonas Meurer ]
+  * New upstream release 2.0.3
+  * debian/control:
+    - Bump standards-version to 4.1.4, no changes required
+    - Change my mail address to 'jonas@freesources.org'
+    - Change Vcs links to the new repository on salsa.debian.org
+  * debian/README.source: minor improvements
+  * debian/doc/crypttab.xml: Fix typo in manpage
+
+ -- Jonas Meurer <jonas@freesources.org>  Fri, 15 Jun 2018 15:32:16 +0200
+
+cryptsetup (2:2.0.2-1kali1) kali-dev; urgency=medium
+
+  * Synchronize with Debian. Remaining changes:
+    - add debian/patches/cryptsetup_nuke_keys.patch to nuke decryption keys
+      with special passphrase
+
+ -- Sophie Brun <sophie@freexian.com>  Mon, 07 May 2018 15:50:45 +0200
 
 cryptsetup (2:2.0.2-1) unstable; urgency=low
 
@@ -19,13 +227,6 @@ cryptsetup (2:2.0.2-1) unstable; urgency=low
     API function.
 
  -- Guilhem Moulin <guilhem@debian.org>  Sat, 17 Mar 2018 18:03:03 +0100
-
-cryptsetup (2:2.0.1-1parrot1) testing; urgency=medium
-
-  * Non-maintainer upload.
-  * Rebuild on Parro Build System.
-
- -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Mon, 09 Apr 2018 01:01:02 +0200
 
 cryptsetup (2:2.0.1-1kali1) kali-dev; urgency=medium
 

@@ -48,7 +48,7 @@ for anything).
 Now you'll have to edit /etc/crypttab. The format should be familiar but
 I'll state it here again:
 
-	name device /boot/keys/root luks, keyscript=decrypt_opensc
+	name device /boot/keys/root luks,keyscript=decrypt_opensc
 
 The modules needed by the reader should now be added to
 /etc/initramfs-tools/modules, so they are loaded on boot time. For

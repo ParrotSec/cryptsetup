@@ -104,18 +104,18 @@ static int FEC_read_interleaved(struct fec_context *ctx, uint64_t i,
 	return -1;
 }
 
-/* encodes inputs to fd */
-static int FEC_encode_inputs(struct crypt_device *cd,
-			     struct crypt_params_verity *params,
-			     struct fec_input_device *inputs,
-			     size_t ninputs, int fd)
+/* encodes/decode inputs to/from fd */
+static int FEC_process_inputs(struct crypt_device *cd,
+			      struct crypt_params_verity *params,
+			      struct fec_input_device *inputs,
+			      size_t ninputs, int fd,
+			      int decode, unsigned int *errors)
 {
 	int r = 0;
 	unsigned int i;
 	struct fec_context ctx;
 	uint32_t b;
 	uint64_t n;
-	uint8_t parity[params->fec_roots];
 	uint8_t rs_block[FEC_RSM];
 	uint8_t *buf = NULL;
 	void *rs;
@@ -129,7 +129,7 @@ static int FEC_encode_inputs(struct crypt_device *cd,
 
 	rs = init_rs_char(FEC_PARAMS(ctx.roots));
 	if (!rs) {
-		log_err(cd, _("Failed to allocate RS context.\n"));
+		log_err(cd, _("Failed to allocate RS context."));
 		return -ENOMEM;
 	}
 
@@ -144,17 +144,17 @@ static int FEC_encode_inputs(struct crypt_device *cd,
 
 	buf = malloc((size_t)ctx.block_size * ctx.rsn);
 	if (!buf) {
-		log_err(cd, _("Failed to allocate buffer.\n"));
+		log_err(cd, _("Failed to allocate buffer."));
 		r = -ENOMEM;
 		goto out;
 	}
 
-	/* encode input */
+	/* encode/decode input */
 	for (n = 0; n < ctx.rounds; ++n) {
 		for (i = 0; i < ctx.rsn; ++i) {
 			if (FEC_read_interleaved(&ctx, n * ctx.rsn * ctx.block_size + i,
 						 &buf[i * ctx.block_size], ctx.block_size)) {
-				log_err(cd, _("Failed to read RS block %" PRIu64 " byte %d.\n"), n, i);
+				log_err(cd, _("Failed to read RS block %" PRIu64 " byte %d."), n, i);
 				r = -EIO;
 				goto out;
 			}
@@ -164,24 +164,45 @@ static int FEC_encode_inputs(struct crypt_device *cd,
 			for (i = 0; i < ctx.rsn; ++i)
 				rs_block[i] = buf[i * ctx.block_size + b];
 
-			encode_rs_char(rs, rs_block, parity);
-			if (write_buffer(fd, parity, sizeof(parity)) != (ssize_t)sizeof(parity)) {
-				log_err(cd, _("Failed to write parity for RS block %" PRIu64 ".\n"), n);
-				r = -EIO;
-				goto out;
+			/* decoding from parity device */
+			if (decode) {
+				if (read_buffer(fd, &rs_block[ctx.rsn], ctx.roots) != ctx.roots) {
+					log_err(cd, _("Failed to read parity for RS block %" PRIu64 "."), n);
+					r = -EIO;
+					goto out;
+				}
+
+				/* coverity[tainted_data] */
+				r = decode_rs_char(rs, rs_block);
+				if (r < 0) {
+					log_err(cd, _("Failed to repair parity for block %" PRIu64 "."), n);
+					goto out;
+				}
+				/* return number of detected errors */
+				if (errors)
+					*errors += r;
+				r = 0;
+			} else {
+				/* encoding and writing parity data to fec device */
+				encode_rs_char(rs, rs_block, &rs_block[ctx.rsn]);
+				if (write_buffer(fd, &rs_block[ctx.rsn], ctx.roots) != ctx.roots) {
+					log_err(cd, _("Failed to write parity for RS block %" PRIu64 "."), n);
+					r = -EIO;
+					goto out;
+				}
 			}
 		}
 	}
-
 out:
 	free_rs_char(rs);
 	free(buf);
 	return r;
 }
 
-int VERITY_FEC_create(struct crypt_device *cd,
+int VERITY_FEC_process(struct crypt_device *cd,
 		      struct crypt_params_verity *params,
-		      struct device *fec_device)
+		      struct device *fec_device, int check_fec,
+		      unsigned int *errors)
 {
 	int r;
 	int fd = -1;
@@ -200,22 +221,25 @@ int VERITY_FEC_create(struct crypt_device *cd,
 
 	/* validate parameters */
 	if (params->data_block_size != params->hash_block_size) {
-		log_err(cd, _("Block sizes must match for FEC.\n"));
+		log_err(cd, _("Block sizes must match for FEC."));
 		return -EINVAL;
 	}
 
 	if (params->fec_roots > FEC_RSM - FEC_MIN_RSN ||
 		params->fec_roots < FEC_RSM - FEC_MAX_RSN) {
-		log_err(cd, _("Invalid number of parity bytes.\n"));
+		log_err(cd, _("Invalid number of parity bytes."));
 		return -EINVAL;
 	}
 
 	r = -EIO;
 
-	/* output device */
-	fd = open(device_path(fec_device), O_RDWR);
+	if (check_fec)
+		fd = open(device_path(fec_device), O_RDONLY);
+	else
+		fd = open(device_path(fec_device), O_RDWR);
+
 	if (fd == -1) {
-		log_err(cd, _("Cannot open device %s.\n"), device_path(fec_device));
+		log_err(cd, _("Cannot open device %s."), device_path(fec_device));
 		goto out;
 	}
 
@@ -227,25 +251,25 @@ int VERITY_FEC_create(struct crypt_device *cd,
 	/* input devices */
 	inputs[0].fd = open(device_path(inputs[0].device), O_RDONLY);
 	if (inputs[0].fd == -1) {
-		log_err(cd, _("Cannot open device %s.\n"), device_path(inputs[0].device));
+		log_err(cd, _("Cannot open device %s."), device_path(inputs[0].device));
 		goto out;
 	}
 	inputs[1].fd = open(device_path(inputs[1].device), O_RDONLY);
 	if (inputs[1].fd == -1) {
-		log_err(cd, _("Cannot open device %s.\n"), device_path(inputs[1].device));
+		log_err(cd, _("Cannot open device %s."), device_path(inputs[1].device));
 		goto out;
 	}
 
 	/* cover the entire hash device starting from hash_offset */
 	r = device_size(inputs[1].device, &inputs[1].count);
 	if (r) {
-		log_err(cd, _("Failed to determine size for device %s.\n"),
+		log_err(cd, _("Failed to determine size for device %s."),
 				device_path(inputs[1].device));
 		goto out;
 	}
 	inputs[1].count -= inputs[1].start;
 
-	r = FEC_encode_inputs(cd, params, inputs, FEC_INPUT_DEVICES, fd);
+	r = FEC_process_inputs(cd, params, inputs, FEC_INPUT_DEVICES, fd, check_fec, errors);
 out:
 	if (inputs[0].fd != -1)
 		close(inputs[0].fd);

@@ -59,7 +59,8 @@ void JSON_DBG(json_object *jobj, const char *desc)
 	/* FIXME: make this conditional and disable for stable release. */
 	if (desc)
 		log_dbg("%s:", desc);
-	log_dbg("%s", json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PRETTY));
+	log_dbg("%s", json_object_to_json_string_ext(jobj,
+		JSON_C_TO_STRING_PRETTY | JSON_C_TO_STRING_NOSLASHESCAPE));
 }
 
 /*
@@ -120,6 +121,16 @@ json_object *LUKS2_get_keyslot_jobj(struct luks2_hdr *hdr, int keyslot)
 	return jobj2;
 }
 
+json_object *LUKS2_get_tokens_jobj(struct luks2_hdr *hdr)
+{
+	json_object *jobj_tokens;
+
+	if (!hdr || !json_object_object_get_ex(hdr->jobj, "tokens", &jobj_tokens))
+		return NULL;
+
+	return jobj_tokens;
+}
+
 json_object *LUKS2_get_token_jobj(struct luks2_hdr *hdr, int token)
 {
 	json_object *jobj1, *jobj2;
@@ -128,10 +139,11 @@ json_object *LUKS2_get_token_jobj(struct luks2_hdr *hdr, int token)
 	if (!hdr || token < 0)
 		return NULL;
 
-	if (snprintf(token_name, sizeof(token_name), "%u", token) < 1)
+	jobj1 = LUKS2_get_tokens_jobj(hdr);
+	if (!jobj1)
 		return NULL;
 
-	if (!json_object_object_get_ex(hdr->jobj, "tokens", &jobj1))
+	if (snprintf(token_name, sizeof(token_name), "%u", token) < 1)
 		return NULL;
 
 	json_object_object_get_ex(jobj1, token_name, &jobj2);
@@ -240,8 +252,8 @@ static json_bool numbered(const char *name, const char *key)
 	return TRUE;
 }
 
-static json_object *contains(json_object *jobj, const char *name,
-			     const char *section, const char *key, json_type type)
+json_object *json_contains(json_object *jobj, const char *name,
+			   const char *section, const char *key, json_type type)
 {
 	json_object *sobj;
 
@@ -305,7 +317,8 @@ static json_bool validate_keyslots_array(json_object *jarr, json_object *jobj_ke
 			return FALSE;
 		}
 
-		if (!contains(jobj_keys, "", "Keyslots section", json_object_get_string(jobj), json_type_object))
+		if (!json_contains(jobj_keys, "", "Keyslots section",
+				   json_object_get_string(jobj), json_type_object))
 			return FALSE;
 
 		i++;
@@ -326,7 +339,8 @@ static json_bool validate_segments_array(json_object *jarr, json_object *jobj_se
 			return FALSE;
 		}
 
-		if (!contains(jobj_segments, "", "Segments section", json_object_get_string(jobj), json_type_object))
+		if (!json_contains(jobj_segments, "", "Segments section",
+				   json_object_get_string(jobj), json_type_object))
 			return FALSE;
 
 		i++;
@@ -393,9 +407,9 @@ int LUKS2_keyslot_validate(json_object *hdr_jobj, json_object *hdr_keyslot, cons
 {
 	json_object *jobj_key_size;
 
-	if (!contains(hdr_keyslot, key, "Keyslot", "type", json_type_string))
+	if (!json_contains(hdr_keyslot, key, "Keyslot", "type", json_type_string))
 		return 1;
-	if (!(jobj_key_size = contains(hdr_keyslot, key, "Keyslot", "key_size", json_type_int)))
+	if (!(jobj_key_size = json_contains(hdr_keyslot, key, "Keyslot", "key_size", json_type_int)))
 		return 1;
 
 	/* enforce uint32_t type */
@@ -418,10 +432,10 @@ int LUKS2_token_validate(json_object *hdr_jobj, json_object *jobj_token, const c
 	if (!json_object_object_get_ex(hdr_jobj, "keyslots", &jobj_keyslots))
 		return 1;
 
-	if (!contains(jobj_token, key, "Token", "type", json_type_string))
+	if (!json_contains(jobj_token, key, "Token", "type", json_type_string))
 		return 1;
 
-	jarr = contains(jobj_token, key, "Token", "keyslots", json_type_array);
+	jarr = json_contains(jobj_token, key, "Token", "keyslots", json_type_array);
 	if (!jarr)
 		return 1;
 
@@ -434,11 +448,18 @@ int LUKS2_token_validate(json_object *hdr_jobj, json_object *jobj_token, const c
 static int hdr_validate_json_size(json_object *hdr_jobj)
 {
 	json_object *jobj, *jobj1;
+	const char *json;
+	uint64_t json_area_size, json_size;
 
 	json_object_object_get_ex(hdr_jobj, "config", &jobj);
 	json_object_object_get_ex(jobj, "json_size", &jobj1);
 
-	return (strlen(json_object_to_json_string_ext(hdr_jobj, JSON_C_TO_STRING_PLAIN)) > json_object_get_uint64(jobj1));
+	json = json_object_to_json_string_ext(hdr_jobj,
+		JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE);
+	json_area_size = json_object_get_uint64(jobj1);
+	json_size = (uint64_t)strlen(json);
+
+	return json_size > json_area_size ? 1 : 0;
 }
 
 int LUKS2_check_json_size(const struct luks2_hdr *hdr)
@@ -509,20 +530,20 @@ static int hdr_validate_segments(json_object *hdr_jobj)
 		if (!numbered("Segment", key))
 			return 1;
 
-		if (!contains(val, key, "Segment", "type",     json_type_string) ||
-		    !(jobj_offset = contains(val, key, "Segment", "offset", json_type_string)) ||
-		    !(jobj_ivoffset = contains(val, key, "Segment", "iv_tweak", json_type_string)) ||
-		    !(jobj_length = contains(val, key, "Segment", "size", json_type_string)) ||
-		    !contains(val, key, "Segment", "encryption",   json_type_string) ||
-		    !(jobj_sector_size = contains(val, key, "Segment", "sector_size", json_type_int)))
+		if (!json_contains(val, key, "Segment", "type", json_type_string) ||
+		    !(jobj_offset = json_contains(val, key, "Segment", "offset", json_type_string)) ||
+		    !(jobj_ivoffset = json_contains(val, key, "Segment", "iv_tweak", json_type_string)) ||
+		    !(jobj_length = json_contains(val, key, "Segment", "size", json_type_string)) ||
+		    !json_contains(val, key, "Segment", "encryption", json_type_string) ||
+		    !(jobj_sector_size = json_contains(val, key, "Segment", "sector_size", json_type_int)))
 			return 1;
 
 		/* integrity */
 		if (json_object_object_get_ex(val, "integrity", &jobj_integrity)) {
-			if (!contains(val, key, "Segment", "integrity", json_type_object) ||
-			    !contains(jobj_integrity, key, "Segment integrity", "type", json_type_string) ||
-			    !contains(jobj_integrity, key, "Segment integrity", "journal_encryption", json_type_string) ||
-			    !contains(jobj_integrity, key, "Segment integrity", "journal_integrity", json_type_string))
+			if (!json_contains(val, key, "Segment", "integrity", json_type_object) ||
+			    !json_contains(jobj_integrity, key, "Segment integrity", "type", json_type_string) ||
+			    !json_contains(jobj_integrity, key, "Segment integrity", "journal_encryption", json_type_string) ||
+			    !json_contains(jobj_integrity, key, "Segment integrity", "journal_integrity", json_type_string))
 				return 1;
 		}
 
@@ -586,11 +607,9 @@ static int hdr_validate_areas(json_object *hdr_jobj)
 	int length, ret, i = 0;
 	uint64_t first_offset;
 
-	/* keyslots should already be validated */
 	if (!json_object_object_get_ex(hdr_jobj, "keyslots", &jobj_keyslots))
 		return 1;
 
-	/* segments should already be validated */
 	if (!json_object_object_get_ex(hdr_jobj, "segments", &jobj_segments))
 		return 1;
 
@@ -613,9 +632,9 @@ static int hdr_validate_areas(json_object *hdr_jobj)
 
 	json_object_object_foreach(jobj_keyslots, key, val) {
 
-		if (!(jobj_area = contains(val, key, "Keyslot", "area", json_type_object)) ||
-		    !(jobj_offset = contains(jobj_area, key, "Keyslot", "offset", json_type_string)) ||
-		    !(jobj_length = contains(jobj_area, key, "Keyslot", "size", json_type_string)) ||
+		if (!(jobj_area = json_contains(val, key, "Keyslot", "area", json_type_object)) ||
+		    !(jobj_offset = json_contains(jobj_area, key, "Keyslot", "offset", json_type_string)) ||
+		    !(jobj_length = json_contains(jobj_area, key, "Keyslot", "size", json_type_string)) ||
 		    !numbered("offset", json_object_get_string(jobj_offset)) ||
 		    !numbered("size", json_object_get_string(jobj_length))) {
 			free(intervals);
@@ -667,9 +686,9 @@ static int hdr_validate_digests(json_object *hdr_jobj)
 		if (!numbered("Digest", key))
 			return 1;
 
-		if (!contains(val, key, "Digest", "type", json_type_string) ||
-		    !(jarr_keys = contains(val, key, "Digest", "keyslots", json_type_array)) ||
-		    !(jarr_segs = contains(val, key, "Digest", "segments", json_type_array)))
+		if (!json_contains(val, key, "Digest", "type", json_type_string) ||
+		    !(jarr_keys = json_contains(val, key, "Digest", "keyslots", json_type_array)) ||
+		    !(jarr_segs = json_contains(val, key, "Digest", "segments", json_type_array)))
 			return 1;
 
 		if (!validate_keyslots_array(jarr_keys, jobj_keyslots))
@@ -737,7 +756,7 @@ static int hdr_validate_config(json_object *hdr_jobj)
 		return 1;
 	}
 
-	if (!(jobj = contains(jobj_config, "section", "Config", "json_size", json_type_string)) ||
+	if (!(jobj = json_contains(jobj_config, "section", "Config", "json_size", json_type_string)) ||
 	    !json_str_to_uint64(jobj, &json_size))
 		return 1;
 
@@ -752,7 +771,7 @@ static int hdr_validate_config(json_object *hdr_jobj)
 		return 1;
 	}
 
-	if (!(jobj = contains(jobj_config, "section", "Config", "keyslots_size", json_type_string)))
+	if (!(jobj = json_contains(jobj_config, "section", "Config", "keyslots_size", json_type_string)))
 		return 1;
 
 	if (validate_keyslots_size(hdr_jobj, jobj))
@@ -760,7 +779,7 @@ static int hdr_validate_config(json_object *hdr_jobj)
 
 	/* Flags array is optional */
 	if (json_object_object_get_ex(jobj_config, "flags", &jobj)) {
-		if (!contains(jobj_config, "section", "Config", "flags", json_type_array))
+		if (!json_contains(jobj_config, "section", "Config", "flags", json_type_array))
 			return 1;
 
 		/* All array members must be strings */
@@ -771,12 +790,12 @@ static int hdr_validate_config(json_object *hdr_jobj)
 
 	/* Requirements object is optional */
 	if (json_object_object_get_ex(jobj_config, "requirements", &jobj)) {
-		if (!contains(jobj_config, "section", "Config", "requirements", json_type_object))
+		if (!json_contains(jobj_config, "section", "Config", "requirements", json_type_object))
 			return 1;
 
 		/* Mandatory array is optional */
 		if (json_object_object_get_ex(jobj, "mandatory", &jobj1)) {
-			if (!contains(jobj, "section", "Requirements", "mandatory", json_type_array))
+			if (!json_contains(jobj, "section", "Requirements", "mandatory", json_type_array))
 				return 1;
 
 			/* All array members must be strings */
@@ -816,6 +835,10 @@ int LUKS2_hdr_validate(json_object *hdr_jobj)
 		return 1;
 	}
 
+	/* validate keyslot implementations */
+	if (LUKS2_keyslots_validate(hdr_jobj))
+		return 1;
+
 	return 0;
 }
 
@@ -825,7 +848,7 @@ int LUKS2_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr)
 
 	r = device_read_lock(cd, crypt_metadata_device(cd));
 	if (r) {
-		log_err(cd, _("Failed to acquire read lock on device %s.\n"),
+		log_err(cd, _("Failed to acquire read lock on device %s."),
 			device_path(crypt_metadata_device(cd)));
 		return r;
 	}
@@ -837,7 +860,7 @@ int LUKS2_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr)
 
 		r = device_write_lock(cd, crypt_metadata_device(cd));
 		if (r) {
-			log_err(cd, _("Failed to acquire write lock on device %s.\n"),
+			log_err(cd, _("Failed to acquire write lock on device %s."),
 				device_path(crypt_metadata_device(cd)));
 			return r;
 		}
@@ -851,17 +874,11 @@ int LUKS2_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr)
 	return r;
 }
 
-/* NOTE: is called before LUKS2 validation routines */
-static void LUKS2_hdr_free_unused_objects(struct crypt_device *cd, struct luks2_hdr *hdr)
-{
-	/* erase unused digests (no assigned keyslot or segment) */
-	LUKS2_digests_erase_unused(cd, hdr);
-}
-
 int LUKS2_hdr_write(struct crypt_device *cd, struct luks2_hdr *hdr)
 {
-	/* FIXME: we risk to hide future internal implementation bugs with this */
-	LUKS2_hdr_free_unused_objects(cd, hdr);
+	/* NOTE: is called before LUKS2 validation routines */
+	/* erase unused digests (no assigned keyslot or segment) */
+	LUKS2_digests_erase_unused(cd, hdr);
 
 	if (LUKS2_hdr_validate(hdr->jobj))
 		return -EINVAL;
@@ -874,7 +891,7 @@ int LUKS2_hdr_uuid(struct crypt_device *cd, struct luks2_hdr *hdr, const char *u
 	uuid_t partitionUuid;
 
 	if (uuid && uuid_parse(uuid, partitionUuid) == -1) {
-		log_err(cd, _("Wrong LUKS UUID format provided.\n"));
+		log_err(cd, _("Wrong LUKS UUID format provided."));
 		return -EINVAL;
 	}
 	if (!uuid)
@@ -954,7 +971,7 @@ int LUKS2_hdr_backup(struct crypt_device *cd, struct luks2_hdr *hdr,
 
 	r = device_read_lock(cd, device);
 	if (r) {
-		log_err(cd, _("Failed to acquire read lock on device %s.\n"),
+		log_err(cd, _("Failed to acquire read lock on device %s."),
 			device_path(crypt_metadata_device(cd)));
 		crypt_safe_free(buffer);
 		return r;
@@ -963,7 +980,7 @@ int LUKS2_hdr_backup(struct crypt_device *cd, struct luks2_hdr *hdr,
 	devfd = device_open_locked(device, O_RDONLY);
 	if (devfd < 0) {
 		device_read_unlock(device);
-		log_err(cd, _("Device %s is not a valid LUKS device.\n"), device_path(device));
+		log_err(cd, _("Device %s is not a valid LUKS device."), device_path(device));
 		crypt_safe_free(buffer);
 		return devfd == -1 ? -EINVAL : devfd;
 	}
@@ -982,14 +999,14 @@ int LUKS2_hdr_backup(struct crypt_device *cd, struct luks2_hdr *hdr,
 	devfd = open(backup_file, O_CREAT|O_EXCL|O_WRONLY, S_IRUSR);
 	if (devfd == -1) {
 		if (errno == EEXIST)
-			log_err(cd, _("Requested header backup file %s already exists.\n"), backup_file);
+			log_err(cd, _("Requested header backup file %s already exists."), backup_file);
 		else
-			log_err(cd, _("Cannot create header backup file %s.\n"), backup_file);
+			log_err(cd, _("Cannot create header backup file %s."), backup_file);
 		crypt_safe_free(buffer);
 		return -EINVAL;
 	}
 	if (write_buffer(devfd, buffer, buffer_size) < buffer_size) {
-		log_err(cd, _("Cannot write header backup file %s.\n"), backup_file);
+		log_err(cd, _("Cannot write header backup file %s."), backup_file);
 		r = -EIO;
 	} else
 		r = 0;
@@ -1027,7 +1044,7 @@ int LUKS2_hdr_restore(struct crypt_device *cd, struct luks2_hdr *hdr,
 	/* FIXME: why lock backup device ? */
 	r = device_read_lock(cd, backup_device);
 	if (r) {
-		log_err(cd, _("Failed to acquire read lock on device %s.\n"),
+		log_err(cd, _("Failed to acquire read lock on device %s."),
 			device_path(backup_device));
 		device_free(backup_device);
 		return r;
@@ -1038,13 +1055,13 @@ int LUKS2_hdr_restore(struct crypt_device *cd, struct luks2_hdr *hdr,
 	device_free(backup_device);
 
 	if (r < 0) {
-		log_err(cd, _("Backup file doesn't contain valid LUKS header.\n"));
+		log_err(cd, _("Backup file doesn't contain valid LUKS header."));
 		goto out;
 	}
 
 	/* do not allow header restore from backup with unmet requirements */
 	if (LUKS2_unmet_requirements(cd, &hdr_file, 0, 1)) {
-		log_err(cd, _("Forbidden LUKS2 requirements detected in backup %s.\n"),
+		log_err(cd, _("Forbidden LUKS2 requirements detected in backup %s."),
 			backup_file);
 		r = -ETXTBSY;
 		goto out;
@@ -1059,13 +1076,13 @@ int LUKS2_hdr_restore(struct crypt_device *cd, struct luks2_hdr *hdr,
 
 	devfd = open(backup_file, O_RDONLY);
 	if (devfd == -1) {
-		log_err(cd, _("Cannot open header backup file %s.\n"), backup_file);
+		log_err(cd, _("Cannot open header backup file %s."), backup_file);
 		r = -EINVAL;
 		goto out;
 	}
 
 	if (read_buffer(devfd, buffer, buffer_size) < buffer_size) {
-		log_err(cd, _("Cannot read header backup file %s.\n"), backup_file);
+		log_err(cd, _("Cannot read header backup file %s."), backup_file);
 		r = -EIO;
 		goto out;
 	}
@@ -1085,13 +1102,13 @@ int LUKS2_hdr_restore(struct crypt_device *cd, struct luks2_hdr *hdr,
 		if (!reqs_reencrypt(reqs)) {
 			log_dbg("Checking LUKS2 header size and offsets.");
 			if (LUKS2_get_data_offset(&tmp_hdr) != LUKS2_get_data_offset(&hdr_file)) {
-				log_err(cd, _("Data offset differ on device and backup, restore failed.\n"));
+				log_err(cd, _("Data offset differ on device and backup, restore failed."));
 				r = -EINVAL;
 				goto out;
 			}
 			/* FIXME: what could go wrong? Erase if we're fine with consequences */
 			if (buffer_size != (ssize_t) LUKS2_hdr_and_areas_size(tmp_hdr.jobj)) {
-				log_err(cd, _("Binary header with keyslot areas size differ on device and backup, restore failed.\n"));
+				log_err(cd, _("Binary header with keyslot areas size differ on device and backup, restore failed."));
 				r = -EINVAL;
 				goto out;
 			}
@@ -1121,7 +1138,7 @@ int LUKS2_hdr_restore(struct crypt_device *cd, struct luks2_hdr *hdr,
 	/* TODO: perform header restore on bdev in stand-alone routine? */
 	r = device_write_lock(cd, device);
 	if (r) {
-		log_err(cd, _("Failed to acquire write lock on device %s.\n"),
+		log_err(cd, _("Failed to acquire write lock on device %s."),
 			device_path(device));
 		goto out;
 	}
@@ -1129,10 +1146,10 @@ int LUKS2_hdr_restore(struct crypt_device *cd, struct luks2_hdr *hdr,
 	devfd = device_open_locked(device, O_RDWR);
 	if (devfd < 0) {
 		if (errno == EACCES)
-			log_err(cd, _("Cannot write to device %s, permission denied.\n"),
+			log_err(cd, _("Cannot write to device %s, permission denied."),
 				device_path(device));
 		else
-			log_err(cd, _("Cannot open device %s.\n"), device_path(device));
+			log_err(cd, _("Cannot open device %s."), device_path(device));
 		device_write_unlock(device);
 		r = -EINVAL;
 		goto out;
@@ -1206,7 +1223,7 @@ int LUKS2_config_get_flags(struct crypt_device *cd, struct luks2_hdr *hdr, uint3
 				found = 1;
 			}
 		if (!found)
-			log_verbose(cd, _("Ignored unknown flag %s.\n"),
+			log_verbose(cd, _("Ignored unknown flag %s."),
 				    json_object_get_string(jobj1));
 	}
 
@@ -1743,13 +1760,13 @@ static int LUKS2_keyslot_get_volume_key_size(struct luks2_hdr *hdr, const char *
 	json_object *jobj1, *jobj2, *jobj3;
 
 	if (!json_object_object_get_ex(hdr->jobj, "keyslots", &jobj1))
-		return 0;
+		return -1;
 
 	if (!json_object_object_get_ex(jobj1, keyslot, &jobj2))
-		return 0;
+		return -1;
 
 	if (!json_object_object_get_ex(jobj2, "key_size", &jobj3))
-		return 0;
+		return -1;
 
 	return json_object_get_int(jobj3);
 }
@@ -1850,7 +1867,7 @@ int LUKS2_activate(struct crypt_device *cd,
 
 	if (dmd.u.crypt.tag_size) {
 		if (!LUKS2_integrity_compatible(hdr)) {
-			log_err(cd, "Unsupported device integrity configuration.\n");
+			log_err(cd, "Unsupported device integrity configuration.");
 			return -EINVAL;
 		}
 
@@ -1877,7 +1894,7 @@ int LUKS2_activate(struct crypt_device *cd,
 					   crypt_get_data_offset(cd) * SECTOR_SIZE,
 					   &dmd.size);
 		if (r < 0) {
-			log_err(cd, "Cannot detect integrity device size.\n");
+			log_err(cd, "Cannot detect integrity device size.");
 			device_free(device);
 			dm_remove_device(cd, dm_int_name, 0);
 			return r;
@@ -1903,14 +1920,14 @@ int LUKS2_unmet_requirements(struct crypt_device *cd, struct luks2_hdr *hdr, uin
 
 	if (r) {
 		if (!quiet)
-			log_err(cd, _("Failed to read LUKS2 requirements.\n"));
+			log_err(cd, _("Failed to read LUKS2 requirements."));
 		return r;
 	}
 
 	/* do not mask unknown requirements check */
 	if (reqs_unknown(reqs)) {
 		if (!quiet)
-			log_err(cd, _("Unmet LUKS2 requirements detected.\n"));
+			log_err(cd, _("Unmet LUKS2 requirements detected."));
 		return -ETXTBSY;
 	}
 
@@ -1918,8 +1935,31 @@ int LUKS2_unmet_requirements(struct crypt_device *cd, struct luks2_hdr *hdr, uin
 	reqs &= ~reqs_mask;
 
 	if (reqs_reencrypt(reqs) && !quiet)
-		log_err(cd, _("Offline reencryption in progress. Aborting.\n"));
+		log_err(cd, _("Offline reencryption in progress. Aborting."));
 
 	/* any remaining unmasked requirement fails the check */
 	return reqs ? -EINVAL : 0;
+}
+
+/*
+ * NOTE: this routine is called on json object that failed validation.
+ * 	 Proceed with caution :)
+ *
+ * known glitches so far:
+ *
+ * any version < 2.0.3:
+ *  - luks2 keyslot pbkdf params change via crypt_keyslot_change_by_passphrase()
+ *    could leave previous type parameters behind. Correct this by purging
+ *    all params not needed by current type.
+ */
+void LUKS2_hdr_repair(json_object *hdr_jobj)
+{
+	json_object *jobj_keyslots;
+
+	if (!json_object_object_get_ex(hdr_jobj, "keyslots", &jobj_keyslots))
+		return;
+	if (!json_object_is_type(jobj_keyslots, json_type_object))
+		return;
+
+	LUKS2_keyslots_repair(jobj_keyslots);
 }

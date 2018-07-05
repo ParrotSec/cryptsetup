@@ -121,8 +121,6 @@ int LUKS2_digest_verify(struct crypt_device *cd,
 	int digest, r;
 
 	digest = LUKS2_digest_by_keyslot(cd, hdr, keyslot);
-	if (digest == -ENOENT)
-		return 0;
 	if (digest < 0)
 		return digest;
 
@@ -137,7 +135,7 @@ int LUKS2_digest_verify(struct crypt_device *cd,
 		return r;
 	}
 
-	return 0;
+	return digest;
 }
 
 int LUKS2_digest_dump(struct crypt_device *cd, int digest)
@@ -174,9 +172,10 @@ int LUKS2_digest_verify_by_segment(struct crypt_device *cd,
 		return r;
 	}
 
-	return 0;
+	return digest;
 }
 
+/* FIXME: segment can have more digests */
 int LUKS2_digest_by_segment(struct crypt_device *cd,
 	struct luks2_hdr *hdr,
 	int segment)

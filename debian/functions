@@ -1,0 +1,413 @@
+TABFILE="${TABFILE-/etc/crypttab}"
+
+# Logging helpers. Send the argument list to plymouth(1), or fold it
+# and print it to the standard error.
+cryptsetup_message() {
+    local IFS=' '
+    if [ "${INITSTATE-}" = "initramfs" ] && [ -x /bin/plymouth ] && plymouth --ping; then
+        plymouth message --text="cryptsetup: $*"
+    elif [ ${#*} -lt 70 ]; then
+        echo "cryptsetup: $*" >&2
+    else
+        # use busybox's fold(1) and sed(1) at initramfs stage
+        echo "cryptsetup: $*" | fold -s | sed '1! s/^/    /' >&2
+    fi
+    return 0
+}
+
+# crypttab_parse_options([$CRYPTTAB_OPTIONS, $export])
+#   Parse CRYPTTAB_OPTIONS, a comma-separated option string from the
+#   crypttab(5) 4th column, build a suitable CRYPTTAB_OPTION_<option>
+#   environment unless $export is "n"
+crypttab_parse_options() {
+    local options="${1:-$CRYPTTAB_OPTIONS}" export="${2:-y}"
+    local IFS=',' x OPTION VALUE
+    unset -v CRYPTTAB_OPTION_cipher \
+             CRYPTTAB_OPTION_size \
+             CRYPTTAB_OPTION_hash \
+             CRYPTTAB_OPTION_offset \
+             CRYPTTAB_OPTION_skip \
+             CRYPTTAB_OPTION_verify \
+             CRYPTTAB_OPTION_readonly \
+             CRYPTTAB_OPTION_discard \
+             CRYPTTAB_OPTION_plain \
+             CRYPTTAB_OPTION_luks \
+             CRYPTTAB_OPTION_tcrypt \
+             CRYPTTAB_OPTION_veracrypt \
+             CRYPTTAB_OPTION_swap \
+             CRYPTTAB_OPTION_tmp \
+             CRYPTTAB_OPTION_check \
+             CRYPTTAB_OPTION_checkargs \
+             CRYPTTAB_OPTION_tries \
+             CRYPTTAB_OPTION_initramfs \
+             CRYPTTAB_OPTION_noearly \
+             CRYPTTAB_OPTION_noauto \
+             CRYPTTAB_OPTION_loud \
+             CRYPTTAB_OPTION_quiet \
+             CRYPTTAB_OPTION_keyscript \
+             CRYPTTAB_OPTION_keyslot \
+             CRYPTTAB_OPTION_header \
+             CRYPTTAB_OPTION_tcrypthidden
+    for x in $options; do
+        OPTION="${x%%=*}"
+        VALUE="${x#*=}"
+        if [ "$x" = "$OPTION" ]; then
+            unset -v VALUE
+        fi
+        if ! _crypttab_validate_option; then
+            cryptsetup_message "ERROR: $CRYPTTAB_NAME: invalid value for '${x%%=*}' option, skipping"
+            return 1
+        elif [ -z "${OPTION+x}" ]; then
+            continue
+        fi
+        if [ "$export" != "n" ]; then
+            export "CRYPTTAB_OPTION_$OPTION"="${VALUE-yes}"
+        else
+            eval "CRYPTTAB_OPTION_$OPTION"='${VALUE-yes}'
+        fi
+    done
+    IFS=' '
+
+    if [ -z "${CRYPTTAB_OPTION_luks+x}" ] && [ -n "${CRYPTTAB_OPTION_header+x}" ]; then
+        cryptsetup_message "WARNING: Option 'luks' missing in crypttab for target $CRYPTTAB_NAME." \
+                           "Headers are only supported for LUKS devices."
+    fi
+    if [ -z "${CRYPTTAB_OPTION_luks+x}" ] && [ -z "${CRYPTTAB_OPTION_tcrypt+x}" ]; then
+        # the compiled-in default for these are subject to change
+        options='cipher size'
+        if [ -n "${CRYPTTAB_OPTION_keyscript+x}" ] || [ "$key" = "none" ]; then
+            options="$options hash" # --hash is being ignored in plain mode with keyfile specified
+        fi
+        for o in $options; do
+            if eval [ -z "\${CRYPTTAB_OPTION_$o+x}" ]; then
+                cryptsetup_message "WARNING: Option '$o' missing in crypttab for plain dm-crypt" \
+                    "mapping $CRYPTTAB_NAME. Please read /usr/share/doc/cryptsetup/README.initramfs and" \
+                    "add the correct '$o' option to your crypttab(5)."
+            fi
+        done
+    fi
+}
+
+# _crypttab_validate_option()
+#   Validate $OPTION=$VALUE (or flag $OPTION if VALUE is unset).  return
+#   1 on error, unsets OPTION for unknown or useless options.
+_crypttab_validate_option() {
+    # option aliases
+    case "$OPTION" in
+        read-only) OPTION="readonly";;
+        key-slot) OPTION="keyslot";;
+        tcrypt-hidden) OPTION="tcrypthidden";;
+        tcrypt-veracrypt) OPTION="veracrypt";;
+    esac
+
+    # sanitize the option name so CRYPTTAB_OPTION_$OPTION is a valid variable name
+    local o="$OPTION"
+    case "$o" in
+        keyfile-offset) OPTION="keyfile_offset";;
+        keyfile-size) OPTION="keyfile_size";;
+    esac
+
+    case "$o" in
+        # value must be a non-empty string
+        cipher|hash|header)
+            [ -n "${VALUE:+x}" ] || return 1
+        ;;
+        # numeric options >0
+        size|keyfile-size)
+            if ! printf '%s' "${VALUE-}" | grep -Exq "0*[1-9][0-9]*"; then
+                return 1
+            fi
+        ;;
+        # numeric options >=0
+        offset|skip|tries|keyslot|keyfile-offset)
+            if ! printf '%s' "${VALUE-}" | grep -Exq "[0-9]+"; then
+                return 1
+            fi
+        ;;
+        tmp)
+            if [ -z "${VALUE+x}" ]; then
+                VALUE="ext4" # 'tmp flag'
+            elif [ -z "$VALUE" ]; then
+                return 1
+            fi
+        ;;
+        check)
+            if [ -z "${VALUE+x}" ]; then
+                if [ -n "${CRYPTDISKS_CHECK-}" ]; then
+                    VALUE="$CRYPTDISKS_CHECK"
+                else
+                    unset -v OPTION
+                    return 0
+                fi
+            fi
+            if [ -x "/lib/cryptsetup/checks/$VALUE" ] && [ -f "/lib/cryptsetup/checks/$VALUE" ]; then
+                VALUE="/lib/cryptsetup/checks/$VALUE"
+            elif [ ! -x "$VALUE" ] || [ ! -f "$VALUE" ]; then
+                return 1
+            fi
+        ;;
+        checkargs)
+            [ -n "${VALUE+x}" ] || return 1 # must have a value (possibly empty)
+        ;;
+        keyscript)
+            [ -n "${VALUE:+x}" ] || return 1 # must have a value
+            if [ "${VALUE#/}" = "$VALUE" ]; then
+                VALUE="/lib/cryptsetup/scripts/$VALUE"
+            fi
+            if [ ! -x "$VALUE" ] || [ ! -f "$VALUE" ]; then
+                return 1
+            fi
+        ;;
+        # and now the flags
+        verify) ;;
+        loud) ;;
+        quiet) ;;
+        initramfs) ;;
+        noearly) ;;
+        noauto) ;;
+        readonly) ;;
+        discard) ;;
+        plain) ;;
+        luks) ;;
+        swap) ;;
+        tcrypt) ;;
+        veracrypt) ;;
+        tcrypthidden) ;;
+        *)
+            cryptsetup_message "WARNING: $CRYPTTAB_NAME: ignoring unknown option '$o'";
+            unset -v OPTION
+        ;;
+    esac
+}
+
+# crypttab_copy_keys_to_initramfs($keyscript)
+#   Copy keys to the initramfs image for each crypttab(5) entry using
+#   the given $keyscript.
+#   Return 0 on success, 1 on error.  Exits if the keyscript isn't
+#   already installed to the initramfs (by the cryptroot hook file).
+crypttab_copy_keys_to_initramfs() {
+    local keyscript="/lib/cryptsetup/scripts/$1"
+    local crypttab="$DESTDIR/cryptroot/crypttab"
+    local CRYPTTAB_NAME CRYPTTAB_SOURCE key options v
+    local rv=0
+
+    if [ ! -x "$DESTDIR/$keyscript" ] || [ ! -f "$crypttab" ]; then
+        exit 0
+    fi
+
+    # Install cryptroot key files into initramfs
+    while read CRYPTTAB_NAME CRYPTTAB_SOURCE key options; do
+        [ "${CRYPTTAB_NAME#\#}" = "$CRYPTTAB_NAME" ] || continue
+        crypttab_parse_options "$options" n || continue
+        if [ "${CRYPTTAB_OPTION_keyscript-}" = "$keyscript" ]; then
+            if [ -f "$key" ]; then
+                copy_file keyfile "$key"
+            else
+                cryptsetup_message "ERROR: Target $CRYPTTAB_NAME has a non-existing key file $key"
+                rv=1
+            fi
+        fi
+    done <"$crypttab"
+    return $rv
+}
+
+# gen_crypttab_from_kernel_cmdline()
+#   Create or replace the initramfs' crypttab(5) with the entries
+#   computed from the "cryptopts" kernel boot arguments, if there are
+#   any.  (If there are no "cryptopts" kernel boot arguments, then the
+#   initramfs' crypttab(5) is preserved.)  This function always touches
+#   /cryptroot/crypttab, so other scripts can determine whether it is up
+#   to date by comparing its ctime with the uptime.
+gen_crypttab_from_kernel_cmdline() {
+    mkdir -p /cryptroot # might not exist if there is no crypttab(5) yet
+    if ! grep -qE '^(.*\s)?cryptopts=' /proc/cmdline; then
+        touch /cryptroot/crypttab
+        return 0
+    fi
+
+    local IFS=',' cryptopts x
+    local target source key options
+    tr ' ' '\n' </proc/cmdline | sed -n 's/^cryptopts=//p' | while read cryptopts; do
+        # skip empty values (which can be used to disable the initramfs
+        # scripts for a particular boot, cf. #873840)
+        [ -n "$cryptopts" ] || continue
+
+        unset -v target source key options
+        for x in $cryptopts; do
+            case "$x" in
+                target=*) target="${x#target=}";;
+                source=*) source="${x#source=}";;
+                key=*) key="${x#key=}";;
+                *) options="${options+$options,}$x";;
+            esac
+        done
+        if [ -z "${source:+x}" ]; then
+            cryptsetup_message "ERROR: Missing source= value in kernel parameter cryptopts=$cryptopts"
+            continue
+        else
+            printf '%s %s %s %s\n' "${target:-cryptroot}" "$source" \
+                                   "${key:-none}" "$options"
+        fi
+    done >/cryptroot/crypttab
+    return 0
+}
+
+# normalise_device([--quiet],$device)
+#   Print the block device (not symlink) associated with the given
+#   (link to a) block $device.  Like for fstab(5), LABEL=<label>
+#   UUID=<uuid>, PARTUUID=<partuuid> and PARTLABEL=<partlabel> may be
+#   given instead of a device name.
+#   Return 0 on success, 1 on error.
+normalise_device() {
+    local dev="$1" quiet='n'
+    if [ "$dev" = '--quiet' ] && [ $# -eq 2 ]; then
+        quiet='y'
+        dev="$2"
+    fi
+
+    local input="$dev"
+    if [ "${dev#UUID=}" != "$dev" ] && [ -n "${dev#UUID=}" ]; then
+        dev="/dev/disk/by-uuid/${dev#UUID=}"
+    elif [ "${dev#LABEL=}" != "$dev" ] && [ -n "${dev#LABEL=}" ]; then
+        dev="/dev/disk/by-label/$(printf '%s' "${dev#LABEL=}" | sed 's,/,\\x2f,g')"
+    elif [ "${dev#PARTUUID=}" != "$dev" ] && [ -n "${dev#PARTUUID=}" ]; then
+        dev="/dev/disk/by-partuuid/${dev#PARTUUID=}"
+    elif [ "${dev#PARTLABEL=}" != "$dev" ] && [ -n "${dev#PARTLABEL=}" ]; then
+        dev="/dev/disk/by-partlabel/$(printf '%s' "${dev#PARTLABEL=}" | sed 's,/,\\x2f,g')"
+    fi
+    if dev="$(readlink -f -- "$dev")" && [ -n "$dev" ] && [ -b "$dev" ]; then
+        printf '%s\n' "$dev"
+        return 0
+    elif [ "$quiet" = n ]; then
+        cryptsetup_message "ERROR: Couldn't normalise device $input"
+    fi
+    return 1
+}
+
+# run_keyscript($keyscriptarg, $tried_count)
+#   exec()'ute `$CRYPTTAB_OPTION_keyscript $keyscriptarg`.
+#   If $CRYPTTAB_OPTION_keyscript is unset or null and $keyscriptarg is
+#   "none" (meaning the passphrase is to be read interactively from the
+#   console), use `/lib/cryptsetup/askpass` as keyscript with a suitable
+#   prompt message.
+#   Since the shell process is replaced with the $CRYPTTAB_OPTION_keyscript
+#   program, run_keyscript() must be used on the left-hand side of a
+#   pipe, or similar.
+run_keyscript() {
+    local keyscriptarg="$1" CRYPTTAB_TRIED="$2" keyscript;
+    export CRYPTTAB_TRIED
+
+    if [ -n "${CRYPTTAB_OPTION_keyscript+x}" ] && \
+            [ "$CRYPTTAB_OPTION_keyscript" != "/lib/cryptsetup/askpass" ]; then
+        # 'keyscript' option is present: export its argument as
+        # $CRYPTTAB_KEY
+        export CRYPTTAB_KEY="$keyscriptarg"
+        keyscript="$CRYPTTAB_OPTION_keyscript"
+    elif [ "$keyscriptarg" = none ]; then
+        # don't export the prompt message as CRYPTTAB_KEY
+        keyscript="/lib/cryptsetup/askpass"
+        keyscriptarg="Please unlock disk $CRYPTTAB_NAME: "
+    fi
+
+    exec "$keyscript" "$keyscriptarg"
+}
+
+# get_crypt_type()
+#    Return the mapping's type, depending on its
+#    $CRYPTTAB_OPTION_<option> values
+get_crypt_type() {
+    local type="plain" # assume plain dm-crypt device by default
+    if [ "${CRYPTTAB_OPTION_tcrypt-}" = "yes" ]; then
+        type="tcrypt"
+    elif [ "${CRYPTTAB_OPTION_plain-}" = "yes" ]; then
+        type="plain"
+    elif [ "${CRYPTTAB_OPTION_luks-}" = "yes" ] ||
+            /sbin/cryptsetup isLuks -- "${CRYPTTAB_OPTION_header-$CRYPTTAB_SOURCE}"; then
+        type="luks"
+    fi
+    echo "$type"
+}
+
+# unlock_mapping($keyfile, $name)
+#   Run cryptsetup(8) with suitable options and arguments to unlock
+#   $CRYPTTAB_SOURCE and setup dm-crypt managed device-mapper mapping
+#   $name
+unlock_mapping() {
+    local keyfile="$1" name="$2"
+
+    if [ -n "${CRYPTTAB_OPTION_header+x}" ] && [ ! -f "${CRYPTTAB_OPTION_header}" ]; then
+        cryptsetup_message "ERROR: $name: LUKS header '${CRYPTTAB_OPTION_header}' missing"
+        return 1
+    fi
+
+    local type="$(get_crypt_type)"
+    if [ "$type" = "luks" ] || [ "$type" = "tcrypt" ]; then
+        # ignored for LUKS and TCRYPT devices
+        unset -v CRYPTTAB_OPTION_cipher \
+                 CRYPTTAB_OPTION_size \
+                 CRYPTTAB_OPTION_hash \
+                 CRYPTTAB_OPTION_offset \
+                 CRYPTTAB_OPTION_skip
+    fi
+    if [ "$type" = "plain" ] || [ "$type" = "tcrypt" ]; then
+        unset -v CRYPTTAB_OPTION_keyfile_size
+    fi
+    if [ "$type" = "tcrypt" ]; then
+        # ignored for TCRYPT devices
+        unset -v CRYPTTAB_OPTION_keyfile_offset
+    else
+        # ignored for non-TCRYPT devices
+        unset -v CRYPTTAB_OPTION_veracrypt CRYPTTAB_OPTION_tcrypthidden
+    fi
+
+    if [ "$type" != "luks" ]; then
+        # ignored for non-LUKS devices
+        unset -v CRYPTTAB_OPTION_keyslot
+    fi
+
+    /sbin/cryptsetup -T1 \
+        ${CRYPTTAB_OPTION_header:+--header="$CRYPTTAB_OPTION_header"} \
+        ${CRYPTTAB_OPTION_cipher:+--cipher="$CRYPTTAB_OPTION_cipher"} \
+        ${CRYPTTAB_OPTION_size:+--key-size="$CRYPTTAB_OPTION_size"} \
+        ${CRYPTTAB_OPTION_hash:+--hash="$CRYPTTAB_OPTION_hash"} \
+        ${CRYPTTAB_OPTION_offset:+--offset="$CRYPTTAB_OPTION_offset"} \
+        ${CRYPTTAB_OPTION_skip:+--skip="$CRYPTTAB_OPTION_skip"} \
+        ${CRYPTTAB_OPTION_verify:+--verify-passphrase} \
+        ${CRYPTTAB_OPTION_readonly:+--readonly} \
+        ${CRYPTTAB_OPTION_discard:+--allow-discards} \
+        ${CRYPTTAB_OPTION_veracrypt:+--veracrypt} \
+        ${CRYPTTAB_OPTION_keyslot:+--key-slot="$CRYPTTAB_OPTION_keyslot"} \
+        ${CRYPTTAB_OPTION_tcrypthidden:+--tcrypt-hidden} \
+        ${CRYPTTAB_OPTION_keyfile_size:+--keyfile-size="$CRYPTTAB_OPTION_keyfile_size"} \
+        ${CRYPTTAB_OPTION_keyfile_offset:+--keyfile-offset="$CRYPTTAB_OPTION_keyfile_offset"} \
+        --type="$type" --key-file="${keyfile:--}" \
+        open -- "$CRYPTTAB_SOURCE" "$name"
+}
+
+# check_key($keyfile)
+#   Sanity check for keys
+check_key() {
+    local keyfile="$1"
+
+    if [ ! -f "$keyfile" ] && [ ! -b "$keyfile" ] && [ ! -c "$keyfile" ] ; then
+        cryptsetup_message "WARNING: $CRYPTTAB_NAME: keyfile '$keyfile' not found"
+        return 0
+    fi
+
+    if [ "$keyfile" = "/dev/random" -o "$keyfile" = "/dev/urandom" ]; then
+        if [ -n "${CRYPTTAB_OPTION_luks+x}" ] || [ -n "${CRYPTTAB_OPTION_tcrypt+x}" ]; then
+            cryptsetup_message "WARNING: $CRYPTTAB_NAME: has random data as key"
+            return 1
+        else
+            return 0
+        fi
+    fi
+
+    local mode="$(stat -c '%04a' "$keyfile")"
+    if [ $(stat -c%u "$keyfile") -ne 0 ] || [ "${mode%00}" = "$mode" ]; then
+        cryptsetup_message "WARNING: $CRYPTTAB_NAME: key file $keyfile has" \
+            "insecure ownership, see /usr/share/doc/cryptsetup/README.Debian."
+    fi
+}
+
+# vim: set filetype=sh :

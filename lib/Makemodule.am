@@ -54,6 +54,8 @@ libcryptsetup_la_SOURCES = \
 	lib/utils_device_locking.c	\
 	lib/utils_device_locking.h	\
 	lib/utils_pbkdf.c		\
+	lib/utils_io.c			\
+	lib/utils_io.h			\
 	lib/libdevmapper.c		\
 	lib/utils_dm.h			\
 	lib/volumekey.c			\
@@ -77,6 +79,7 @@ libcryptsetup_la_SOURCES = \
 	lib/verity/verity.c		\
 	lib/verity/verity.h		\
 	lib/verity/rs_encode_char.c	\
+	lib/verity/rs_decode_char.c	\
 	lib/verity/rs.h                 \
 	lib/luks2/luks2_disk_metadata.c	\
 	lib/luks2/luks2_json_format.c	\

@@ -182,6 +182,7 @@ int LUKS2_token_create(struct crypt_device *cd,
 
 		if (h && h->validate && h->validate(cd, json)) {
 			json_object_put(jobj);
+			log_dbg("Token type %s validation failed.", h->name);
 			return -EINVAL;
 		}
 
@@ -262,7 +263,7 @@ int LUKS2_builtin_token_create(struct crypt_device *cd,
 
 	if (token == CRYPT_ANY_TOKEN) {
 		if ((token = LUKS2_token_find_free(hdr)) < 0)
-			log_err(cd, _("No free token slot\n"));
+			log_err(cd, _("No free token slot."));
 	}
 	if (token < 0 || token >= LUKS2_TOKENS_MAX)
 		return -EINVAL;
@@ -270,14 +271,15 @@ int LUKS2_builtin_token_create(struct crypt_device *cd,
 
 	r = th->set(&jobj_token, params);
 	if (r) {
-		log_err(cd, _("Failed to create builtin token %s\n"), type);
+		log_err(cd, _("Failed to create builtin token %s."), type);
 		return r;
 	}
 
 	// builtin tokens must produce valid json
 	r = LUKS2_token_validate(hdr->jobj, jobj_token, "new");
 	assert(!r);
-	r = th->h->validate(cd, json_object_to_json_string_ext(jobj_token, JSON_C_TO_STRING_PLAIN));
+	r = th->h->validate(cd, json_object_to_json_string_ext(jobj_token,
+		JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE));
 	assert(!r);
 
 	json_object_object_get_ex(hdr->jobj, "tokens", &jobj_tokens);
@@ -396,7 +398,8 @@ int LUKS2_token_open_and_activate(struct crypt_device *cd,
 		return r;
 
 	r = LUKS2_keyslot_open_by_token(cd, hdr, token,
-					name ? CRYPT_DEFAULT_SEGMENT : CRYPT_ANY_SEGMENT,
+					(flags & CRYPT_ACTIVATE_ALLOW_UNBOUND_KEY) ?
+					CRYPT_ANY_SEGMENT : CRYPT_DEFAULT_SEGMENT,
 					buffer, buffer_len, &vk);
 
 	LUKS2_token_buffer_free(cd, token, buffer, buffer_len);
@@ -441,7 +444,8 @@ int LUKS2_token_open_and_activate_any(struct crypt_device *cd,
 			continue;
 
 		r = LUKS2_keyslot_open_by_token(cd, hdr, token,
-						name ? CRYPT_DEFAULT_SEGMENT : CRYPT_ANY_SEGMENT,
+						(flags & CRYPT_ACTIVATE_ALLOW_UNBOUND_KEY) ?
+						CRYPT_ANY_SEGMENT : CRYPT_DEFAULT_SEGMENT,
 						buffer, buffer_len, &vk);
 		LUKS2_token_buffer_free(cd, token, buffer, buffer_len);
 		if (r >= 0)
@@ -472,7 +476,8 @@ void LUKS2_token_dump(struct crypt_device *cd, int token)
 	if (h && h->dump) {
 		jobj_token = LUKS2_get_token_jobj(crypt_get_hdr(cd, CRYPT_LUKS2), token);
 		if (jobj_token)
-			h->dump(cd, json_object_to_json_string_ext(jobj_token, JSON_C_TO_STRING_PLAIN));
+			h->dump(cd, json_object_to_json_string_ext(jobj_token,
+				JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE));
 	}
 }
 
@@ -485,7 +490,8 @@ int LUKS2_token_json_get(struct crypt_device *cd, struct luks2_hdr *hdr,
 	if (!jobj_token)
 		return -EINVAL;
 
-	*json = json_object_to_json_string_ext(jobj_token, JSON_C_TO_STRING_PLAIN);
+	*json = json_object_to_json_string_ext(jobj_token,
+		JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE);
 	return 0;
 }
 
@@ -593,4 +599,13 @@ int LUKS2_token_is_assigned(struct crypt_device *cd, struct luks2_hdr *hdr,
 	}
 
 	return -ENOENT;
+}
+
+int LUKS2_tokens_count(struct luks2_hdr *hdr)
+{
+	json_object *jobj_tokens = LUKS2_get_tokens_jobj(hdr);
+	if (!jobj_tokens)
+		return -EINVAL;
+
+	return json_object_object_length(jobj_tokens);
 }

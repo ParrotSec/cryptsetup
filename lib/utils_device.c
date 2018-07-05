@@ -58,13 +58,19 @@ struct device {
 
 static size_t device_fs_block_size_fd(int fd)
 {
+	size_t page_size = crypt_getpagesize();
+
 #ifdef HAVE_SYS_STATVFS_H
 	struct statvfs buf;
 
-	if (!fstatvfs(fd, &buf) && buf.f_bsize)
+	/*
+	 * NOTE: some filesystems (NFS) returns bogus blocksize (1MB).
+	 * Page-size io should always work and avoids increasing IO beyond aligned LUKS header.
+	 */
+	if (!fstatvfs(fd, &buf) && buf.f_bsize && buf.f_bsize <= page_size)
 		return (size_t)buf.f_bsize;
 #endif
-	return crypt_getpagesize();
+	return page_size;
 }
 
 static size_t device_block_size_fd(int fd, size_t *min_size)
@@ -175,7 +181,7 @@ static int device_ready(struct device *device)
 	}
 
 	if (devfd < 0) {
-		log_err(NULL, _("Device %s doesn't exist or access denied.\n"),
+		log_err(NULL, _("Device %s doesn't exist or access denied."),
 			device_path(device));
 		return -EINVAL;
 	}
@@ -246,7 +252,9 @@ static int device_open_internal(struct device *device, int flags)
 		devfd = open(device_path(device), flags);
 
 	if (devfd < 0)
-		log_dbg("Cannot open device %s.", device_path(device));
+		log_dbg("Cannot open device %s%s.",
+			device_path(device),
+			(flags & O_ACCMODE) != O_RDONLY ? " for write" : "");
 
 	return devfd;
 }
@@ -589,13 +597,13 @@ out:
 		break;
 	case -EBUSY:
 		log_err(cd, _("Cannot use device %s which is in use "
-			      "(already mapped or mounted).\n"), device->path);
+			      "(already mapped or mounted)."), device->path);
 		break;
 	case -EACCES:
-		log_err(cd, _("Cannot use device %s, permission denied.\n"), device->path);
+		log_err(cd, _("Cannot use device %s, permission denied."), device->path);
 		break;
 	default:
-		log_err(cd, _("Cannot get info about device %s.\n"), device->path);
+		log_err(cd, _("Cannot get info about device %s."), device->path);
 	}
 
 	return r;
@@ -618,7 +626,7 @@ static int device_internal_prepare(struct crypt_device *cd, struct device *devic
 
 	if (getuid() || geteuid()) {
 		log_err(cd, _("Cannot use a loopback device, "
-			      "running as non-root user.\n"));
+			      "running as non-root user."));
 		return -ENOTSUP;
 	}
 
@@ -628,7 +636,7 @@ static int device_internal_prepare(struct crypt_device *cd, struct device *devic
 	loop_fd = crypt_loop_attach(&loop_device, device->path, 0, 1, &readonly);
 	if (loop_fd == -1) {
 		log_err(cd, _("Attaching loopback device failed "
-			"(loop device with autoclear flag is required).\n"));
+			"(loop device with autoclear flag is required)."));
 		free(loop_device);
 		return -EINVAL;
 	}
@@ -673,7 +681,7 @@ int device_block_adjust(struct crypt_device *cd,
 		return r;
 
 	if (device_offset >= real_size) {
-		log_err(cd, _("Requested offset is beyond real size of device %s.\n"),
+		log_err(cd, _("Requested offset is beyond real size of device %s."),
 			device->path);
 		return -EINVAL;
 	}
@@ -681,7 +689,7 @@ int device_block_adjust(struct crypt_device *cd,
 	if (size && !*size) {
 		*size = real_size;
 		if (!*size) {
-			log_err(cd, _("Device %s has zero size.\n"), device->path);
+			log_err(cd, _("Device %s has zero size."), device->path);
 			return -ENOTBLK;
 		}
 		*size -= device_offset;
@@ -692,7 +700,7 @@ int device_block_adjust(struct crypt_device *cd,
 		log_dbg("Device %s: offset = %" PRIu64 " requested size = %" PRIu64
 			", backing device size = %" PRIu64,
 			device->path, device_offset, *size, real_size);
-		log_err(cd, _("Device %s is too small.\n"), device->path);
+		log_err(cd, _("Device %s is too small."), device->path);
 		return -EINVAL;
 	}
 

@@ -65,7 +65,7 @@ static int _read_mk(const char *file, char **key, int keysize)
 	int fd;
 
 	if (keysize <= 0 || keysize > MAX_KEY_SIZE) {
-		log_err(_("Invalid key size.\n"));
+		log_err(_("Invalid key size."));
 		return -EINVAL;
 	}
 
@@ -75,11 +75,11 @@ static int _read_mk(const char *file, char **key, int keysize)
 
 	fd = open(file, O_RDONLY);
 	if (fd == -1) {
-		log_err(_("Cannot read keyfile %s.\n"), file);
+		log_err(_("Cannot read keyfile %s."), file);
 		goto fail;
 	}
 	if ((read(fd, *key, keysize) != keysize)) {
-		log_err(_("Cannot read %d bytes from keyfile %s.\n"), keysize, file);
+		log_err(_("Cannot read %d bytes from keyfile %s."), keysize, file);
 		close(fd);
 		goto fail;
 	}
@@ -159,7 +159,7 @@ static int _wipe_data_device(struct crypt_device *cd, const char *integrity_key)
 	r = crypt_wipe(cd, tmp_path, CRYPT_WIPE_ZERO, 0, 0, DEFAULT_WIPE_BLOCK,
 		       0, &tools_wipe_progress, NULL);
 	if (crypt_deactivate(cd, tmp_name))
-		log_err(_("Cannot deactivate temporary device %s.\n"), tmp_path);
+		log_err(_("Cannot deactivate temporary device %s."), tmp_path);
 	set_int_block(0);
 
 	return r;
@@ -184,7 +184,7 @@ static int action_format(int arg)
 	if (opt_integrity) {
 		r = crypt_parse_hash_integrity_mode(opt_integrity, integrity);
 		if (r < 0) {
-			log_err(_("No known integrity specification pattern detected.\n"));
+			log_err(_("No known integrity specification pattern detected."));
 			return r;
 		}
 		params.integrity = integrity;
@@ -193,7 +193,7 @@ static int action_format(int arg)
 	if (opt_journal_integrity) {
 		r = crypt_parse_hash_integrity_mode(opt_journal_integrity, journal_integrity);
 		if (r < 0) {
-			log_err(_("No known integrity specification pattern detected.\n"));
+			log_err(_("No known integrity specification pattern detected."));
 			return r;
 		}
 		params.journal_integrity = journal_integrity;
@@ -202,7 +202,7 @@ static int action_format(int arg)
 	if (opt_journal_crypt) {
 		r = crypt_parse_hash_integrity_mode(opt_journal_crypt, journal_crypt);
 		if (r < 0) {
-			log_err(_("No known integrity specification pattern detected.\n"));
+			log_err(_("No known integrity specification pattern detected."));
 			return r;
 		}
 		params.journal_crypt = journal_crypt;
@@ -249,7 +249,7 @@ static int action_open(int arg)
 	if (opt_integrity) {
 		r = crypt_parse_hash_integrity_mode(opt_integrity, integrity);
 		if (r < 0) {
-			log_err(_("No known integrity specification pattern detected.\n"));
+			log_err(_("No known integrity specification pattern detected."));
 			return r;
 		}
 		params.integrity = integrity;
@@ -258,7 +258,7 @@ static int action_open(int arg)
 	if (opt_journal_integrity) {
 		r = crypt_parse_hash_integrity_mode(opt_journal_integrity, journal_integrity);
 		if (r < 0) {
-			log_err(_("No known integrity specification pattern detected.\n"));
+			log_err(_("No known integrity specification pattern detected."));
 			return r;
 
 		}
@@ -268,7 +268,7 @@ static int action_open(int arg)
 	if (opt_journal_crypt) {
 		r = crypt_parse_hash_integrity_mode(opt_journal_crypt, journal_crypt);
 		if (r < 0) {
-			log_err(_("No known integrity specification pattern detected.\n"));
+			log_err(_("No known integrity specification pattern detected."));
 			return r;
 		}
 		params.journal_crypt = journal_crypt;
@@ -376,6 +376,8 @@ static int action_status(int arg)
 		log_std("  mode:    %s%s\n",
 			cad.flags & CRYPT_ACTIVATE_READONLY ? "readonly" : "read/write",
 			cad.flags & CRYPT_ACTIVATE_RECOVERY ? " recovery" : "");
+		log_std("  failures: %" PRIu64 "\n",
+			crypt_get_active_integrity_failures(cd, action_argv[0]));
 		if (cad.flags & CRYPT_ACTIVATE_NO_JOURNAL) {
 			log_std("  journal: not active\n");
 		} else {
@@ -490,24 +492,24 @@ int main(int argc, const char **argv)
 		{ "interleave-sectors", '\0', POPT_ARG_INT,  &opt_interleave_sectors, 0, N_("Interleave sectors"), N_("SECTORS") },
 		{ "journal-watermark",  '\0', POPT_ARG_INT,  &opt_journal_watermark,  0, N_("Journal watermark"),N_("percent") },
 		{ "journal-commit-time",'\0', POPT_ARG_INT,  &opt_journal_commit_time,0, N_("Journal commit time"), N_("ms") },
-		{ "tag-size",            't', POPT_ARG_INT,  &opt_tag_size,           0, N_("Tag size per-sector"), N_("bytes") },
+		{ "tag-size",            't', POPT_ARG_INT,  &opt_tag_size,           0, N_("Tag size (per-sector)"), N_("bytes") },
 		{ "sector-size",         's', POPT_ARG_INT,  &opt_sector_size,        0, N_("Sector size"), N_("bytes") },
 		{ "buffer-sectors",     '\0', POPT_ARG_INT,  &opt_buffer_sectors,     0, N_("Buffers size"), N_("SECTORS") },
 
-		{ "integrity",                  'I', POPT_ARG_STRING, &opt_integrity,                 0, N_("Data integrity algorithm (default "DEFAULT_ALG_NAME ")"), NULL },
+		{ "integrity",                  'I', POPT_ARG_STRING, &opt_integrity,                 0, N_("Data integrity algorithm"), NULL },
 		{ "integrity-key-size",        '\0', POPT_ARG_INT,    &opt_integrity_key_size,        0, N_("The size of the data integrity key"), N_("BITS") },
-		{ "integrity-key-file",        '\0', POPT_ARG_STRING, &opt_integrity_key_file,        0, N_("Read the integrity key from a file."), NULL },
+		{ "integrity-key-file",        '\0', POPT_ARG_STRING, &opt_integrity_key_file,        0, N_("Read the integrity key from a file"), NULL },
 
 		{ "journal-integrity",         '\0', POPT_ARG_STRING, &opt_journal_integrity,         0, N_("Journal integrity algorithm"), NULL },
 		{ "journal-integrity-key-size",'\0', POPT_ARG_INT,    &opt_journal_integrity_key_size,0, N_("The size of the journal integrity key"), N_("BITS") },
-		{ "journal-integrity-key-file",'\0', POPT_ARG_STRING, &opt_journal_integrity_key_file,0, N_("Read the journal integrity key from a file."), NULL },
+		{ "journal-integrity-key-file",'\0', POPT_ARG_STRING, &opt_journal_integrity_key_file,0, N_("Read the journal integrity key from a file"), NULL },
 
 		{ "journal-crypt",             '\0', POPT_ARG_STRING, &opt_journal_crypt,             0, N_("Journal encryption algorithm"), NULL },
 		{ "journal-crypt-key-size",    '\0', POPT_ARG_INT,    &opt_journal_crypt_key_size,    0, N_("The size of the journal encryption key"), N_("BITS") },
-		{ "journal-crypt-key-file",    '\0', POPT_ARG_STRING, &opt_journal_crypt_key_file,    0, N_("Read the journal encryption key from a file."), NULL },
+		{ "journal-crypt-key-file",    '\0', POPT_ARG_STRING, &opt_journal_crypt_key_file,    0, N_("Read the journal encryption key from a file"), NULL },
 
-		{ "integrity-no-journal",       'D', POPT_ARG_NONE,  &opt_integrity_nojournal, 0, N_("Disable journal for integrity device."), NULL },
-		{ "integrity-recovery-mode",    'R', POPT_ARG_NONE,  &opt_integrity_recovery,  0, N_("Recovery mode (no journal, no tag checking)."), NULL },
+		{ "integrity-no-journal",       'D', POPT_ARG_NONE,  &opt_integrity_nojournal, 0, N_("Disable journal for integrity device"), NULL },
+		{ "integrity-recovery-mode",    'R', POPT_ARG_NONE,  &opt_integrity_recovery,  0, N_("Recovery mode (no journal, no tag checking)"), NULL },
 		POPT_TABLEEND
 	};
 	poptContext popt_context;
@@ -554,7 +556,7 @@ int main(int argc, const char **argv)
 		action_argc++;
 
 	/* Handle aliases */
-	if (!strcmp(aname, "create")) {
+	if (!strcmp(aname, "create") && action_argc > 1) {
 		/* create command had historically switched arguments */
 		if (action_argv[0] && action_argv[1]) {
 			const char *tmp = action_argv[0];
