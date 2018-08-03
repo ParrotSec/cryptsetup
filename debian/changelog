@@ -1,10 +1,8 @@
-cryptsetup (2:2.0.3-4kali1) kali-dev; urgency=medium
+cryptsetup (2:2.0.3-4parrot1) testing; urgency=medium
 
-  * Synchronize with Debian. Remaining changes:
-    - add debian/patches/cryptsetup_nuke_keys.patch to nuke decryption keys
-      with special passphrase
+  * Import NUKE patch.
 
- -- Sophie Brun <sophie@freexian.com>  Thu, 05 Jul 2018 14:49:03 +0200
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Fri, 03 Aug 2018 10:38:45 +0200
 
 cryptsetup (2:2.0.3-4) unstable; urgency=low
 
@@ -205,13 +203,12 @@ cryptsetup (2:2.0.3-1) unstable; urgency=medium
 
  -- Jonas Meurer <jonas@freesources.org>  Fri, 15 Jun 2018 15:32:16 +0200
 
-cryptsetup (2:2.0.2-1kali1) kali-dev; urgency=medium
+cryptsetup (2:2.0.2-1parrot0) testing; urgency=medium
 
-  * Synchronize with Debian. Remaining changes:
-    - add debian/patches/cryptsetup_nuke_keys.patch to nuke decryption keys
-      with special passphrase
+  * Import new Debian version.
+  * re-include kali nuke patch.
 
- -- Sophie Brun <sophie@freexian.com>  Mon, 07 May 2018 15:50:45 +0200
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Wed, 09 May 2018 17:44:13 +0200
 
 cryptsetup (2:2.0.2-1) unstable; urgency=low
 
@@ -227,6 +224,13 @@ cryptsetup (2:2.0.2-1) unstable; urgency=low
     API function.
 
  -- Guilhem Moulin <guilhem@debian.org>  Sat, 17 Mar 2018 18:03:03 +0100
+
+cryptsetup (2:2.0.1-1parrot1) testing; urgency=medium
+
+  * Non-maintainer upload.
+  * Rebuild on Parro Build System.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Mon, 09 Apr 2018 01:01:02 +0200
 
 cryptsetup (2:2.0.1-1kali1) kali-dev; urgency=medium
 
