@@ -39,6 +39,7 @@ static const char *opt_uuid = NULL;
 static int opt_restart_on_corruption = 0;
 static int opt_ignore_corruption = 0;
 static int opt_ignore_zero_blocks = 0;
+static int opt_check_at_most_once = 0;
 
 static int opt_version_mode = 0;
 
@@ -63,7 +64,7 @@ static int _prepare_format(struct crypt_params_verity *params,
 	} else if (salt_string) {
 		len = crypt_hex_to_bytes(salt_string, &salt, 0);
 		if (len < 0) {
-			log_err(_("Invalid salt string specified.\n"));
+			log_err(_("Invalid salt string specified."));
 			return -EINVAL;
 		}
 		params->salt_size = len;
@@ -94,7 +95,7 @@ static int action_format(int arg)
 	/* Try to create hash image if doesn't exist */
 	r = open(action_argv[1], O_WRONLY | O_EXCL | O_CREAT, S_IRUSR | S_IWUSR);
 	if (r < 0 && errno != EEXIST) {
-		log_err(_("Cannot create hash image %s for writing.\n"), action_argv[1]);
+		log_err(_("Cannot create hash image %s for writing."), action_argv[1]);
 		return -EINVAL;
 	} else if (r >= 0) {
 		log_dbg("Created hash image %s.", action_argv[1]);
@@ -104,7 +105,7 @@ static int action_format(int arg)
 	if (fec_device) {
 		r = open(fec_device, O_WRONLY | O_EXCL | O_CREAT, S_IRUSR | S_IWUSR);
 		if (r < 0 && errno != EEXIST) {
-			log_err(_("Cannot create FEC image %s for writing.\n"), fec_device);
+			log_err(_("Cannot create FEC image %s for writing."), fec_device);
 			return -EINVAL;
 		} else if (r >= 0) {
 			log_dbg("Created FEC image %s.", fec_device);
@@ -153,6 +154,8 @@ static int _activate(const char *dm_device,
 		activate_flags |= CRYPT_ACTIVATE_RESTART_ON_CORRUPTION;
 	if (opt_ignore_zero_blocks)
 		activate_flags |= CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS;
+	if (opt_check_at_most_once)
+		activate_flags |= CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE;
 
 	if (use_superblock) {
 		params.flags = flags;
@@ -175,7 +178,7 @@ static int _activate(const char *dm_device,
 
 	hash_size = crypt_get_volume_key_size(cd);
 	if (crypt_hex_to_bytes(root_hash, &root_hash_bytes, 0) != hash_size) {
-		log_err(_("Invalid root hash string specified.\n"));
+		log_err(_("Invalid root hash string specified."));
 		r = -EINVAL;
 		goto out;
 	}
@@ -317,11 +320,13 @@ static int action_status(int arg)
 		}
 		if (cad.flags & (CRYPT_ACTIVATE_IGNORE_CORRUPTION|
 				 CRYPT_ACTIVATE_RESTART_ON_CORRUPTION|
-				 CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS))
-			log_std("  flags:       %s%s%s\n",
+				 CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS|
+				 CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE))
+			log_std("  flags:       %s%s%s%s\n",
 				(cad.flags & CRYPT_ACTIVATE_IGNORE_CORRUPTION) ? "ignore_corruption " : "",
 				(cad.flags & CRYPT_ACTIVATE_RESTART_ON_CORRUPTION) ? "restart_on_corruption " : "",
-				(cad.flags & CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS) ? "ignore_zero_blocks" : "");
+				(cad.flags & CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS) ? "ignore_zero_blocks " : "",
+				(cad.flags & CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE) ? "check_at_most_once" : "");
 	}
 out:
 	crypt_free(cd);
@@ -435,10 +440,11 @@ int main(int argc, const char **argv)
 		{ "fec-offset",      0,    POPT_ARG_STRING, &popt_tmp,       3, N_("Starting offset on the FEC device"), N_("bytes") },
 		{ "hash",            'h',  POPT_ARG_STRING, &hash_algorithm, 0, N_("Hash algorithm"), N_("string") },
 		{ "salt",            's',  POPT_ARG_STRING, &salt_string,    0, N_("Salt"), N_("hex string") },
-		{ "uuid",            '\0', POPT_ARG_STRING, &opt_uuid,       0, N_("UUID for device to use."), NULL },
+		{ "uuid",            '\0', POPT_ARG_STRING, &opt_uuid,       0, N_("UUID for device to use"), NULL },
 		{ "restart-on-corruption", 0,POPT_ARG_NONE,&opt_restart_on_corruption, 0, N_("Restart kernel if corruption is detected"), NULL },
 		{ "ignore-corruption", 0,  POPT_ARG_NONE, &opt_ignore_corruption,  0, N_("Ignore corruption, log it only"), NULL },
 		{ "ignore-zero-blocks", 0, POPT_ARG_NONE, &opt_ignore_zero_blocks, 0, N_("Do not verify zeroed blocks"), NULL },
+		{ "check-at-most-once", 0, POPT_ARG_NONE, &opt_check_at_most_once, 0, N_("Verify data block only the first time it is read"), NULL },
 		POPT_TABLEEND
 	};
 
@@ -509,7 +515,7 @@ int main(int argc, const char **argv)
 		action_argc++;
 
 	/* Handle aliases */
-	if (!strcmp(aname, "create")) {
+	if (!strcmp(aname, "create") && action_argc > 1) {
 		/* create command had historically switched arguments */
 		if (action_argv[0] && action_argv[1]) {
 			const char *tmp = action_argv[0];

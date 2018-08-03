@@ -22,13 +22,10 @@
  */
 
 #include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 
@@ -63,255 +60,6 @@ uint64_t crypt_getphysmemory_kb(void)
 	return phys_memory_kb;
 }
 
-ssize_t read_buffer(int fd, void *buf, size_t count)
-{
-	size_t read_size = 0;
-	ssize_t r;
-
-	if (fd < 0 || !buf)
-		return -EINVAL;
-
-	do {
-		r = read(fd, buf, count - read_size);
-		if (r == -1 && errno != EINTR)
-			return r;
-		if (r == 0)
-			return (ssize_t)read_size;
-		if (r > 0) {
-			read_size += (size_t)r;
-			buf = (uint8_t*)buf + r;
-		}
-	} while (read_size != count);
-
-	return (ssize_t)count;
-}
-
-ssize_t write_buffer(int fd, const void *buf, size_t count)
-{
-	size_t write_size = 0;
-	ssize_t w;
-
-	if (fd < 0 || !buf || !count)
-		return -EINVAL;
-
-	do {
-		w = write(fd, buf, count - write_size);
-		if (w < 0 && errno != EINTR)
-			return w;
-		if (w == 0)
-			return (ssize_t)write_size;
-		if (w > 0) {
-			write_size += (size_t) w;
-			buf = (const uint8_t*)buf + w;
-		}
-	} while (write_size != count);
-
-	return (ssize_t)write_size;
-}
-
-ssize_t write_blockwise(int fd, size_t bsize, size_t alignment,
-			void *orig_buf, size_t count)
-{
-	void *hangover_buf = NULL, *buf = NULL;
-	size_t hangover, solid;
-	ssize_t r, ret = -1;
-
-	if (fd == -1 || !orig_buf || !bsize || !alignment)
-		return -1;
-
-	hangover = count % bsize;
-	solid = count - hangover;
-
-	if ((size_t)orig_buf & (alignment - 1)) {
-		if (posix_memalign(&buf, alignment, count))
-			return -1;
-		memcpy(buf, orig_buf, count);
-	} else
-		buf = orig_buf;
-
-	if (solid) {
-		r = write_buffer(fd, buf, solid);
-		if (r < 0 || r != (ssize_t)solid)
-			goto out;
-	}
-
-	if (hangover) {
-		if (posix_memalign(&hangover_buf, alignment, bsize))
-			goto out;
-
-		r = read_buffer(fd, hangover_buf, bsize);
-		if (r < 0 || r < (ssize_t)hangover)
-			goto out;
-
-		if (r < (ssize_t)bsize)
-			bsize = r;
-
-		if (lseek(fd, -(off_t)bsize, SEEK_CUR) < 0)
-			goto out;
-
-		memcpy(hangover_buf, (char*)buf + solid, hangover);
-
-		r = write_buffer(fd, hangover_buf, bsize);
-		if (r < 0 || r < (ssize_t)hangover)
-			goto out;
-	}
-	ret = count;
-out:
-	free(hangover_buf);
-	if (buf != orig_buf)
-		free(buf);
-	return ret;
-}
-
-ssize_t read_blockwise(int fd, size_t bsize, size_t alignment,
-		       void *orig_buf, size_t count)
-{
-	void *hangover_buf = NULL, *buf = NULL;
-	size_t hangover, solid;
-	ssize_t r, ret = -1;
-
-	if (fd == -1 || !orig_buf || !bsize || !alignment)
-		return -1;
-
-	hangover = count % bsize;
-	solid = count - hangover;
-
-	if ((size_t)orig_buf & (alignment - 1)) {
-		if (posix_memalign(&buf, alignment, count))
-			return -1;
-	} else
-		buf = orig_buf;
-
-	r = read_buffer(fd, buf, solid);
-	if (r < 0 || r != (ssize_t)solid)
-		goto out;
-
-	if (hangover) {
-		if (posix_memalign(&hangover_buf, alignment, bsize))
-			goto out;
-		r = read_buffer(fd, hangover_buf, bsize);
-		if (r <  0 || r < (ssize_t)hangover)
-			goto out;
-
-		memcpy((char *)buf + solid, hangover_buf, hangover);
-	}
-	ret = count;
-out:
-	free(hangover_buf);
-	if (buf != orig_buf) {
-		memcpy(orig_buf, buf, count);
-		free(buf);
-	}
-	return ret;
-}
-
-/*
- * Combines llseek with blockwise write. write_blockwise can already deal with short writes
- * but we also need a function to deal with short writes at the start. But this information
- * is implicitly included in the read/write offset, which can not be set to non-aligned
- * boundaries. Hence, we combine llseek with write.
- */
-ssize_t write_lseek_blockwise(int fd, size_t bsize, size_t alignment,
-			      void *buf, size_t count, off_t offset)
-{
-	void *frontPadBuf = NULL;
-	size_t frontHang, innerCount = 0;
-	ssize_t r, ret = -1;
-
-	if (fd == -1 || !buf || !bsize || !alignment)
-		return -1;
-
-	if (offset < 0)
-		offset = lseek(fd, offset, SEEK_END);
-
-	if (offset < 0)
-		return -1;
-
-	frontHang = offset % bsize;
-
-	if (lseek(fd, offset - frontHang, SEEK_SET) < 0)
-		return -1;
-
-	if (frontHang) {
-		if (posix_memalign(&frontPadBuf, alignment, bsize))
-			return -1;
-
-		innerCount = bsize - frontHang;
-		if (innerCount > count)
-			innerCount = count;
-
-		r = read_buffer(fd, frontPadBuf, bsize);
-		if (r < 0 || r < (ssize_t)(frontHang + innerCount))
-			goto out;
-
-		memcpy((char*)frontPadBuf + frontHang, buf, innerCount);
-
-		if (lseek(fd, offset - frontHang, SEEK_SET) < 0)
-			goto out;
-
-		r = write_buffer(fd, frontPadBuf, frontHang + innerCount);
-		if (r < 0 || r != (ssize_t)(frontHang + innerCount))
-			goto out;
-
-		buf = (char*)buf + innerCount;
-		count -= innerCount;
-	}
-
-	ret = count ? write_blockwise(fd, bsize, alignment, buf, count) : 0;
-	if (ret >= 0)
-		ret += innerCount;
-out:
-	free(frontPadBuf);
-	return ret;
-}
-
-ssize_t read_lseek_blockwise(int fd, size_t bsize, size_t alignment,
-			     void *buf, size_t count, off_t offset)
-{
-	void *frontPadBuf = NULL;
-	size_t frontHang, innerCount = 0;
-	ssize_t r, ret = -1;
-
-	if (fd == -1 || !buf || bsize <= 0)
-		return -1;
-
-	if (offset < 0)
-		offset = lseek(fd, offset, SEEK_END);
-
-	if (offset < 0)
-		return -1;
-
-	frontHang = offset % bsize;
-
-	if (lseek(fd, offset - frontHang, SEEK_SET) < 0)
-		return -1;
-
-	if (frontHang) {
-		if (posix_memalign(&frontPadBuf, alignment, bsize))
-			return -1;
-
-		innerCount = bsize - frontHang;
-		if (innerCount > count)
-			innerCount = count;
-
-		r = read_buffer(fd, frontPadBuf, bsize);
-		if (r < 0 || r < (ssize_t)(frontHang + innerCount))
-			goto out;
-
-		memcpy(buf, (char*)frontPadBuf + frontHang, innerCount);
-
-		buf = (char*)buf + innerCount;
-		count -= innerCount;
-	}
-
-	ret = read_blockwise(fd, bsize, alignment, buf, count);
-	if (ret >= 0)
-		ret += innerCount;
-out:
-	free(frontPadBuf);
-	return ret;
-}
-
 /* MEMLOCK */
 #define DEFAULT_PROCESS_PRIORITY -18
 
@@ -330,7 +78,7 @@ int crypt_memlock_inc(struct crypt_device *ctx)
 		}
 		errno = 0;
 		if (((_priority = getpriority(PRIO_PROCESS, 0)) == -1) && errno)
-			log_err(ctx, _("Cannot get process priority.\n"));
+			log_err(ctx, _("Cannot get process priority."));
 		else
 			if (setpriority(PRIO_PROCESS, 0, DEFAULT_PROCESS_PRIORITY))
 				log_dbg("setpriority %d failed: %s",
@@ -344,7 +92,7 @@ int crypt_memlock_dec(struct crypt_device *ctx)
 	if (_memlock_count && (!--_memlock_count)) {
 		log_dbg("Unlocking memory.");
 		if (munlockall() == -1)
-			log_err(ctx, _("Cannot unlock memory.\n"));
+			log_err(ctx, _("Cannot unlock memory."));
 		if (setpriority(PRIO_PROCESS, 0, _priority))
 			log_dbg("setpriority %d failed: %s", _priority, strerror(errno));
 	}
@@ -418,12 +166,12 @@ int crypt_keyfile_device_read(struct crypt_device *cd,  const char *keyfile,
 
 	fd = keyfile ? open(keyfile, O_RDONLY) : STDIN_FILENO;
 	if (fd < 0) {
-		log_err(cd, _("Failed to open key file.\n"));
+		log_err(cd, _("Failed to open key file."));
 		return -EINVAL;
 	}
 
 	if (isatty(fd)) {
-		log_err(cd, _("Cannot read keyfile from a terminal.\n"));
+		log_err(cd, _("Cannot read keyfile from a terminal."));
 		r = -EINVAL;
 		goto out_err;
 	}
@@ -440,7 +188,7 @@ int crypt_keyfile_device_read(struct crypt_device *cd,  const char *keyfile,
 	regular_file = 0;
 	if (keyfile) {
 		if (stat(keyfile, &st) < 0) {
-			log_err(cd, _("Failed to stat key file.\n"));
+			log_err(cd, _("Failed to stat key file."));
 			goto out_err;
 		}
 		if (S_ISREG(st.st_mode)) {
@@ -448,7 +196,7 @@ int crypt_keyfile_device_read(struct crypt_device *cd,  const char *keyfile,
 			file_read_size = (uint64_t)st.st_size;
 
 			if (keyfile_offset > file_read_size) {
-				log_err(cd, _("Cannot seek to requested keyfile offset.\n"));
+				log_err(cd, _("Cannot seek to requested keyfile offset."));
 				goto out_err;
 			}
 			file_read_size -= keyfile_offset;
@@ -463,13 +211,13 @@ int crypt_keyfile_device_read(struct crypt_device *cd,  const char *keyfile,
 
 	pass = crypt_safe_alloc(buflen);
 	if (!pass) {
-		log_err(cd, _("Out of memory while reading passphrase.\n"));
+		log_err(cd, _("Out of memory while reading passphrase."));
 		goto out_err;
 	}
 
 	/* Discard keyfile_offset bytes on input */
 	if (keyfile_offset && keyfile_seek(fd, keyfile_offset) < 0) {
-		log_err(cd, _("Cannot seek to requested keyfile offset.\n"));
+		log_err(cd, _("Cannot seek to requested keyfile offset."));
 		goto out_err;
 	}
 
@@ -478,7 +226,7 @@ int crypt_keyfile_device_read(struct crypt_device *cd,  const char *keyfile,
 			buflen += 4096;
 			pass = crypt_safe_realloc(pass, buflen);
 			if (!pass) {
-				log_err(cd, _("Out of memory while reading passphrase.\n"));
+				log_err(cd, _("Out of memory while reading passphrase."));
 				r = -ENOMEM;
 				goto out_err;
 			}
@@ -498,7 +246,7 @@ int crypt_keyfile_device_read(struct crypt_device *cd,  const char *keyfile,
 		}
 		char_read = read_buffer(fd, &pass[i], char_to_read);
 		if (char_read < 0) {
-			log_err(cd, _("Error reading passphrase.\n"));
+			log_err(cd, _("Error reading passphrase."));
 			r = -EPIPE;
 			goto out_err;
 		}
@@ -522,12 +270,12 @@ int crypt_keyfile_device_read(struct crypt_device *cd,  const char *keyfile,
 
 	/* Fail if we exceeded internal default (no specified size) */
 	if (unlimited_read && i == keyfile_size_max) {
-		log_err(cd, _("Maximum keyfile size exceeded.\n"));
+		log_err(cd, _("Maximum keyfile size exceeded."));
 		goto out_err;
 	}
 
 	if (!unlimited_read && i != keyfile_size_max) {
-		log_err(cd, _("Cannot read requested amount of data.\n"));
+		log_err(cd, _("Cannot read requested amount of data."));
 		goto out_err;
 	}
 

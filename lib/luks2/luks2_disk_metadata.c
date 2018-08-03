@@ -74,9 +74,10 @@ static int hdr_checksum_calculate(const char *alg, struct luks2_hdr_disk *hdr_di
 				  const char *json_area, size_t json_len)
 {
 	struct crypt_hash *hd = NULL;
-	int r;
+	int hash_size, r;
 
-	if (crypt_hash_size(alg) <= 0 || crypt_hash_init(&hd, alg))
+	hash_size = crypt_hash_size(alg);
+	if (hash_size <= 0 || crypt_hash_init(&hd, alg))
 		return -EINVAL;
 
 	/* Binary header, csum zeroed. */
@@ -87,7 +88,7 @@ static int hdr_checksum_calculate(const char *alg, struct luks2_hdr_disk *hdr_di
 		r = crypt_hash_write(hd, json_area, json_len);
 
 	if (!r)
-		r = crypt_hash_final(hd, (char*)hdr_disk->csum, crypt_hash_size(alg));
+		r = crypt_hash_final(hd, (char*)hdr_disk->csum, (size_t)hash_size);
 
 	crypt_hash_destroy(hd);
 	return r;
@@ -100,9 +101,10 @@ static int hdr_checksum_check(const char *alg, struct luks2_hdr_disk *hdr_disk,
 			      const char *json_area, size_t json_len)
 {
 	struct luks2_hdr_disk hdr_tmp;
-	int r;
+	int hash_size, r;
 
-	if (crypt_hash_size(alg) <= 0)
+	hash_size = crypt_hash_size(alg);
+	if (hash_size <= 0)
 		return -EINVAL;
 
 	/* Copy header and zero checksum. */
@@ -116,7 +118,7 @@ static int hdr_checksum_check(const char *alg, struct luks2_hdr_disk *hdr_disk,
 	log_dbg_checksum(hdr_disk->csum, alg, "on-disk");
 	log_dbg_checksum(hdr_tmp.csum, alg, "in-memory");
 
-	if (memcmp(hdr_tmp.csum, hdr_disk->csum, crypt_hash_size(alg)))
+	if (memcmp(hdr_tmp.csum, hdr_disk->csum, (size_t)hash_size))
 		return -EINVAL;
 
 	return 0;
@@ -361,7 +363,7 @@ static int LUKS2_check_device_size(struct crypt_device *cd, struct device *devic
 		if (falloc && !device_fallocate(device, hdr_size))
 			return 0;
 
-		log_err(cd, _("Device %s is too small. (LUKS2 requires at least %" PRIu64 " bytes.)\n"),
+		log_err(cd, _("Device %s is too small. (LUKS2 requires at least %" PRIu64 " bytes.)"),
 			device_path(device), hdr_size);
 		return -EINVAL;
 	}
@@ -406,7 +408,8 @@ int LUKS2_disk_hdr_write(struct crypt_device *cd, struct luks2_hdr *hdr, struct 
 	/*
 	 * Generate text space-efficient JSON representation to json area.
 	 */
-	json_text = json_object_to_json_string_ext(hdr->jobj, JSON_C_TO_STRING_PLAIN);
+	json_text = json_object_to_json_string_ext(hdr->jobj,
+			JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE);
 	if (!json_text || !*json_text) {
 		log_dbg("Cannot parse JSON object to text representation.");
 		free(json_area);
@@ -424,7 +427,7 @@ int LUKS2_disk_hdr_write(struct crypt_device *cd, struct luks2_hdr *hdr, struct 
 
 	r = device_write_lock(cd, device);
 	if (r) {
-		log_err(cd, _("Failed to acquire write device lock.\n"));
+		log_err(cd, _("Failed to acquire write device lock."));
 		free(json_area);
 		return r;
 	}
@@ -490,6 +493,15 @@ static int validate_luks2_json_object(json_object *jobj_hdr)
 	}
 
 	r = LUKS2_hdr_validate(jobj_hdr);
+	if (r) {
+		log_dbg("Repairing JSON metadata.");
+		/* try to correct known glitches */
+		LUKS2_hdr_repair(jobj_hdr);
+
+		/* run validation again */
+		r = LUKS2_hdr_validate(jobj_hdr);
+	}
+
 	if (r)
 		log_dbg("ERROR: LUKS2 validation failed");
 

@@ -96,7 +96,6 @@ static void set_dm_error(int level,
 	if (vasprintf(&msg, f, va) > 0) {
 		if (level < 4 && !_quiet_log) {
 			log_err(_context, "%s", msg);
-			log_err(_context, "\n");
 		} else {
 			/* We do not use DM visual stack backtrace here */
 			if (strncmp(msg, "<backtrace>", 11))
@@ -185,6 +184,7 @@ static void _dm_set_verity_compat(unsigned verity_maj,
 	 * ignore_zero_blocks since 1.3 (kernel 4.5)
 	 * (but some dm-verity targets 1.2 don't support it)
 	 * FEC is added in 1.3 as well.
+	 * Check at most once is added in 1.4 (kernel 4.17).
 	 */
 	if (_dm_satisfies_version(1, 3, 0, verity_maj, verity_min, verity_patch)) {
 		_dm_flags |= DM_VERITY_ON_CORRUPTION_SUPPORTED;
@@ -329,10 +329,10 @@ static int dm_init_context(struct crypt_device *cd, dm_target_type target)
 	if (!_dm_check_versions(target)) {
 		if (getuid() || geteuid())
 			log_err(cd, _("Cannot initialize device-mapper, "
-				      "running as non-root user.\n"));
+				      "running as non-root user."));
 		else
 			log_err(cd, _("Cannot initialize device-mapper. "
-				      "Is dm_mod kernel module loaded?\n"));
+				      "Is dm_mod kernel module loaded?"));
 		_context = NULL;
 		return -ENOTSUP;
 	}
@@ -622,6 +622,8 @@ static char *get_dm_verity_params(struct crypt_params_verity *vp,
 		num_options++;
 	if (flags & CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS)
 		num_options++;
+	if (flags & CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE)
+		num_options++;
 
 	if (dmd->u.verity.fec_device) {
 		num_options += 8;
@@ -633,10 +635,11 @@ static char *get_dm_verity_params(struct crypt_params_verity *vp,
 		*fec_features = '\0';
 
 	if (num_options)
-		snprintf(features, sizeof(features)-1, " %d%s%s%s", num_options,
+		snprintf(features, sizeof(features)-1, " %d%s%s%s%s", num_options,
 		(flags & CRYPT_ACTIVATE_IGNORE_CORRUPTION) ? " ignore_corruption" : "",
 		(flags & CRYPT_ACTIVATE_RESTART_ON_CORRUPTION) ? " restart_on_corruption" : "",
-		(flags & CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS) ? " ignore_zero_blocks" : "");
+		(flags & CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS) ? " ignore_zero_blocks" : "",
+		(flags & CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE) ? " check_at_most_once" : "");
 	else
 		*features = '\0';
 
@@ -932,7 +935,7 @@ int dm_remove_device(struct crypt_device *cd, const char *name, uint32_t flags)
 
 	dm_flags(DM_UNKNOWN, &dmt_flags);
 	if (deferred && !(dmt_flags & DM_DEFERRED_SUPPORTED)) {
-		log_err(cd, _("Requested deferred flag is not supported.\n"));
+		log_err(cd, _("Requested deferred flag is not supported."));
 		return -ENOTSUP;
 	}
 
@@ -997,7 +1000,7 @@ static int dm_prepare_uuid(const char *name, const char *type, const char *uuid,
 
 	log_dbg("DM-UUID is %s", buf);
 	if (i >= buflen)
-		log_err(NULL, _("DM-UUID for device %s was truncated.\n"), name);
+		log_err(NULL, _("DM-UUID for device %s was truncated."), name);
 
 	return 1;
 }
@@ -1217,23 +1220,24 @@ int dm_create_device(struct crypt_device *cd, const char *name,
 	if (r == -EINVAL &&
 	    dmd_flags & (CRYPT_ACTIVATE_SAME_CPU_CRYPT|CRYPT_ACTIVATE_SUBMIT_FROM_CRYPT_CPUS) &&
 	    !(dmt_flags & (DM_SAME_CPU_CRYPT_SUPPORTED|DM_SUBMIT_FROM_CRYPT_CPUS_SUPPORTED)))
-		log_err(cd, _("Requested dm-crypt performance options are not supported.\n"));
+		log_err(cd, _("Requested dm-crypt performance options are not supported."));
 
 	if (r == -EINVAL && dmd_flags & (CRYPT_ACTIVATE_IGNORE_CORRUPTION|
 					  CRYPT_ACTIVATE_RESTART_ON_CORRUPTION|
-					  CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS) &&
+					  CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS|
+					  CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE) &&
 	    !(dmt_flags & DM_VERITY_ON_CORRUPTION_SUPPORTED))
-		log_err(cd, _("Requested dm-verity data corruption handling options are not supported.\n"));
+		log_err(cd, _("Requested dm-verity data corruption handling options are not supported."));
 
 	if (r == -EINVAL && dmd->target == DM_VERITY && dmd->u.verity.fec_device &&
 	    !(dmt_flags & DM_VERITY_FEC_SUPPORTED))
-		log_err(cd, _("Requested dm-verity FEC options are not supported.\n"));
+		log_err(cd, _("Requested dm-verity FEC options are not supported."));
 
 	if (r == -EINVAL && dmd->target == DM_CRYPT) {
 		if (dmd->u.crypt.integrity && !(dmt_flags & DM_INTEGRITY_SUPPORTED))
-			log_err(cd, _("Requested data integrity options are not supported.\n"));
+			log_err(cd, _("Requested data integrity options are not supported."));
 		if (dmd->u.crypt.sector_size != SECTOR_SIZE && !(dmt_flags & DM_SECTOR_SIZE_SUPPORTED))
-			log_err(cd, _("Requested sector_size option is not supported.\n"));
+			log_err(cd, _("Requested sector_size option is not supported."));
 	}
 out:
 	crypt_safe_free(table_params);
@@ -1358,6 +1362,29 @@ int dm_status_verity_ok(struct crypt_device *cd, const char *name)
 	r = _dm_status_verity_ok(name);
 	dm_exit_context();
 	return r;
+}
+
+int dm_status_integrity_failures(struct crypt_device *cd, const char *name, uint64_t *count)
+{
+	int r;
+	struct dm_info dmi;
+	char *status_line = NULL;
+
+	if (dm_init_context(cd, DM_INTEGRITY))
+		return -ENOTSUP;
+
+	r = dm_status_dmi(name, &dmi, DM_INTEGRITY_TARGET, &status_line);
+	if (r < 0 || !status_line) {
+		free(status_line);
+		return r;
+	}
+
+	log_dbg("Integrity volume %s failure status is %s.", name, status_line ?: "");
+	*count = strtoull(status_line, NULL, 10);
+	free(status_line);
+	dm_exit_context();
+
+	return 0;
 }
 
 /* FIXME use hex wrapper, user val wrappers for line parsing */
@@ -1490,11 +1517,16 @@ static int _dm_query_crypt(uint32_t get_flags,
 
 		if (get_flags & DM_ACTIVE_CRYPT_KEY) {
 			if (key_[0] == ':') {
-				key_desc = strpbrk(strpbrk(key_ + 1, ":") + 1, ":") + 1;
+				/* :<key_size>:<key_type>:<key_description> */
+				key_desc = NULL;
+				endp = strpbrk(key_ + 1, ":");
+				if (endp)
+					key_desc = strpbrk(endp + 1, ":");
 				if (!key_desc) {
 					r = -ENOMEM;
 					goto err;
 				}
+				key_desc++;
 				crypt_volume_key_set_description(vk, key_desc);
 			} else {
 				buffer[2] = '\0';
@@ -1684,6 +1716,8 @@ static int _dm_query_verity(uint32_t get_flags,
 				dmd->flags |= CRYPT_ACTIVATE_RESTART_ON_CORRUPTION;
 			else if (!strcasecmp(arg, "ignore_zero_blocks"))
 				dmd->flags |= CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS;
+			else if (!strcasecmp(arg, "check_at_most_once"))
+				dmd->flags |= CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE;
 			else if (!strcasecmp(arg, "use_fec_from_device")) {
 				str = strsep(&params, " ");
 				str2 = crypt_lookup_dev(str);
@@ -1694,9 +1728,10 @@ static int _dm_query_verity(uint32_t get_flags,
 						goto err;
 					}
 				}
-				if (vp)
+				if (vp) {
+					free(fec_dev_str);
 					fec_dev_str = str2;
-				else
+				} else
 					free(str2);
 				i++;
 			} else if (!strcasecmp(arg, "fec_start")) {
@@ -2034,6 +2069,23 @@ static int _dm_message(const char *name, const char *msg, uint32_t dmt_flags)
 	r = dm_task_run(dmt);
 out:
 	dm_task_destroy(dmt);
+	return r;
+}
+
+int dm_suspend_device(struct crypt_device *cd, const char *name)
+{
+	int r;
+
+	if (dm_init_context(cd, DM_UNKNOWN))
+		return -ENOTSUP;
+
+	if (!_dm_simple(DM_DEVICE_SUSPEND, name, 0))
+		r = -EINVAL;
+	else
+		r = 0;
+
+	dm_exit_context();
+
 	return r;
 }
 

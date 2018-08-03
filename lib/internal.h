@@ -37,6 +37,7 @@
 #include "utils_dm.h"
 #include "utils_fips.h"
 #include "utils_keyring.h"
+#include "utils_io.h"
 #include "crypto_backend.h"
 
 #include "libcryptsetup.h"
@@ -49,7 +50,7 @@
 #define MAX_SECTOR_SIZE		4096 /* min page size among all platforms */
 #define DEFAULT_DISK_ALIGNMENT	1048576 /* 1MiB */
 #define DEFAULT_MEM_ALIGNMENT	4096
-#define MAX_ERROR_LENGTH	512
+#define LOG_MAX_LEN		4096
 
 #define at_least(a, b) ({ __typeof__(a) __at_least = (a); (__at_least >= (b))?__at_least:(b); })
 
@@ -131,13 +132,6 @@ char *crypt_get_base_device(const char *dev_path);
 uint64_t crypt_dev_partition_offset(const char *dev_path);
 int lookup_by_disk_id(const char *dm_uuid);
 int lookup_by_sysfs_uuid_field(const char *dm_uuid, size_t max_len);
-
-ssize_t write_buffer(int fd, const void *buf, size_t count);
-ssize_t read_buffer(int fd, void *buf, size_t count);
-ssize_t write_blockwise(int fd, size_t bsize, size_t alignment, void *orig_buf, size_t count);
-ssize_t read_blockwise(int fd, size_t bsize, size_t alignment, void *buf, size_t count);
-ssize_t write_lseek_blockwise(int fd, size_t bsize, size_t alignment, void *buf, size_t count, off_t offset);
-ssize_t read_lseek_blockwise(int fd, size_t bsize, size_t alignment, void *buf, size_t count, off_t offset);
 
 size_t crypt_getpagesize(void);
 unsigned crypt_cpusonline(void);

@@ -1,9 +1,9 @@
 AC_PREREQ([2.67])
-AC_INIT([cryptsetup],[2.0.2])
+AC_INIT([cryptsetup],[2.0.3])
 
 dnl library version from <major>.<minor>.<release>[-<suffix>]
 LIBCRYPTSETUP_VERSION=$(echo $PACKAGE_VERSION | cut -f1 -d-)
-LIBCRYPTSETUP_VERSION_INFO=14:0:2
+LIBCRYPTSETUP_VERSION_INFO=15:0:3
 
 AM_SILENT_RULES([yes])
 AC_CONFIG_SRCDIR(src/cryptsetup.c)
@@ -492,6 +492,13 @@ AC_DEFUN([CS_NUM_WITH], [AC_ARG_WITH([$1],
 	[CS_DEFINE([$1], [$3], [$2])]
 )])
 
+AC_DEFUN([CS_ABSPATH], [
+	case "$1" in
+		/*) ;;
+		*) AC_MSG_ERROR([$2 argument must be an absolute path.]);;
+	esac
+])
+
 dnl ==========================================================================
 dnl Python bindings
 AC_ARG_ENABLE([python], AS_HELP_STRING([--enable-python],[enable Python bindings]),
@@ -553,17 +560,16 @@ CS_NUM_WITH([verity-fec-roots],  [parity bytes for verity FEC], [2])
 
 CS_STR_WITH([tmpfilesdir], [override default path to directory with systemd temporary files], [])
 test -z "$with_tmpfilesdir" && with_tmpfilesdir=$systemd_tmpfilesdir
-test "x$with_tmpfilesdir" == "xno" || {
-	test "${with_tmpfilesdir:0:1}" = "/" || AC_MSG_ERROR([--with-tmpfilesdir argument must be an absolute path.])
+test "x$with_tmpfilesdir" = "xno" || {
+	CS_ABSPATH([${with_tmpfilesdir}],[with-tmpfilesdir])
 	DEFAULT_TMPFILESDIR=$with_tmpfilesdir
 	AC_SUBST(DEFAULT_TMPFILESDIR)
 }
 AM_CONDITIONAL(CRYPTSETUP_TMPFILE, test -n "$DEFAULT_TMPFILESDIR")
 
-
 CS_STR_WITH([luks2-lock-path], [path to directory for LUKSv2 locks], [/run/cryptsetup])
 test -z "$with_luks2_lock_path" && with_luks2_lock_path=/run/cryptsetup
-test "${with_luks2_lock_path:0:1}" = "/" || AC_MSG_ERROR([--with-luks2-lock-path argument must be an absolute path.])
+CS_ABSPATH([${with_luks2_lock_path}],[with-luks2-lock-path])
 DEFAULT_LUKS2_LOCK_PATH=$with_luks2_lock_path
 AC_SUBST(DEFAULT_LUKS2_LOCK_PATH)
 
@@ -571,6 +577,19 @@ CS_NUM_WITH([luks2-lock-dir-perms], [default luks2 locking directory permissions
 test -z "$with_luks2_lock_dir_perms" && with_luks2_lock_dir_perms=0700
 DEFAULT_LUKS2_LOCK_DIR_PERMS=$with_luks2_lock_dir_perms
 AC_SUBST(DEFAULT_LUKS2_LOCK_DIR_PERMS)
+
+dnl Override default LUKS format version (for cryptsetup or cryptsetup-reencrypt format actions only).
+AC_ARG_WITH([default_luks_format],
+	AS_HELP_STRING([--with-default-luks-format=FORMAT], [default LUKS format version (LUKS1/LUKS2) [LUKS1]]),
+	[], with_default_luks_format=LUKS1
+)
+
+case $with_default_luks_format in
+	LUKS1) default_luks=CRYPT_LUKS1 ;;
+	LUKS2) default_luks=CRYPT_LUKS2 ;;
+	*) AC_MSG_ERROR([Unknown default LUKS format. Use LUKS1 or LUKS2 only.]) ;;
+esac
+AC_DEFINE_UNQUOTED([DEFAULT_LUKS_FORMAT], [$default_luks], [default LUKS format version])
 
 dnl ==========================================================================
 

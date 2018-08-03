@@ -47,6 +47,8 @@
 #define CRYPT_DEFAULT_SEGMENT 0
 #define CRYPT_DEFAULT_SEGMENT_STR "0"
 
+#define CRYPT_ANY_DIGEST -1
+
 /*
  * LUKS2 header on-disk.
  *
@@ -155,6 +157,8 @@ int LUKS2_hdr_restore(struct crypt_device *cd,
 uint64_t LUKS2_hdr_and_areas_size(json_object *jobj);
 uint64_t LUKS2_keyslots_size(json_object *jobj);
 
+int LUKS2_keyslot_cipher_incompatible(struct crypt_device *cd);
+
 /*
  * Generic LUKS2 keyslot
  */
@@ -246,6 +250,8 @@ int LUKS2_token_open_and_activate_any(struct crypt_device *cd,
 	struct luks2_hdr *hdr,
 	const char *name,
 	uint32_t flags);
+
+int LUKS2_tokens_count(struct luks2_hdr *hdr);
 
 /*
  * Generic LUKS2 digest

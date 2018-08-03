@@ -76,17 +76,23 @@ void check_signal(int *r)
 		*r = -EINTR;
 }
 
+#define LOG_MAX_LEN 4096
+
 __attribute__((format(printf, 5, 6)))
 void clogger(struct crypt_device *cd, int level, const char *file, int line,
 	     const char *format, ...)
 {
 	va_list argp;
-	char *target = NULL;
+	char target[LOG_MAX_LEN + 2];
 
 	va_start(argp, format);
 
-	if (vasprintf(&target, format, argp) > 0) {
+	if (vsnprintf(&target[0], LOG_MAX_LEN, format, argp) > 0) {
 		if (level >= 0) {
+			/* All verbose and error messages in tools end with EOL. */
+			if (level == CRYPT_LOG_VERBOSE || level == CRYPT_LOG_ERROR)
+				strncat(target, "\n", LOG_MAX_LEN);
+
 			crypt_log(cd, level, target);
 #ifdef CRYPT_DEBUG
 		} else if (opt_debug)
@@ -98,7 +104,6 @@ void clogger(struct crypt_device *cd, int level, const char *file, int line,
 	}
 
 	va_end(argp);
-	free(target);
 }
 
 void tool_log(int level, const char *msg, void *usrptr __attribute__((unused)))
@@ -151,7 +156,7 @@ int yesDialog(const char *msg, void *usrptr)
 			r = 0;
 			/* Aborted by signal */
 			if (!quit)
-				log_err(_("Error reading response from terminal.\n"));
+				log_err(_("Error reading response from terminal."));
 			else
 				log_dbg("Query interrupted on signal.");
 		} else if (strcmp(answer, "YES\n")) {
@@ -230,7 +235,7 @@ __attribute__ ((noreturn)) void usage(poptContext popt_context,
 {
 	poptPrintUsage(popt_context, stderr, 0);
 	if (error)
-		log_err("%s: %s\n", more, error);
+		log_err("%s: %s", more, error);
 	poptFreeContext(popt_context);
 	exit(exitcode);
 }
@@ -419,7 +424,7 @@ int tools_wipe_progress(uint64_t size, uint64_t offset, void *usrptr)
 	check_signal(&r);
 	if (r) {
 		tools_clear_line();
-		log_err("\nWipe interrupted.\n");
+		log_err("\nWipe interrupted.");
 	}
 
 	return r;
