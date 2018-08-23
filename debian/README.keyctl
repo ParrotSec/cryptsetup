@@ -6,7 +6,7 @@ When there are multiple cryptsetup (either plain or LUKS) volumes with the same
 passphrase, it is an unnecessary task to input the passphrase more than once.
 
 Just add this script as keyscript to your /etc/crypttab and it will cache the
-passphrase of all cryptab entries with the same identifier.
+passphrase of all crypttab entries with the same identifier.
 
 Either copy decrypt_keyctl into the default search path for keyscripts from
 cryptsetup /lib/cryptdisks/scripts/. So you can just write
@@ -71,7 +71,7 @@ description).
 Keyscript:
 Keyctl_keyscript uses the Linux kernel keyring facility to securly cache
 passphrases between multiple invocations.
-The keyfile parameter from cryptab is used to find the same passphrase between
+The keyfile parameter from crypttab is used to find the same passphrase between
 multiple invocations.
 
 Currently the cache timeout is 60 seconds and not configurable (please report a

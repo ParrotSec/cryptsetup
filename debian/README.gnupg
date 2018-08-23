@@ -16,7 +16,7 @@ First, you'll have to create the encrypted keyfile:
 Next the LUKS device needs to be formated with the key. For that, the
 decrypt_gnupg keyscript can be used:
 
-# /lib/cryptsetup/scripts/decrypt_gnupg /etc/keys/crytpkey.gpg | \
+# /lib/cryptsetup/scripts/decrypt_gnupg /etc/keys/cryptkey.gpg | \
 	cryptsetup --key-file=- luksFormat /dev/<luks_device>
 
 In order to unlock the encrypted LUKS device automatically during boot process,

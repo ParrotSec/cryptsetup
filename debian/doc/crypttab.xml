@@ -57,7 +57,8 @@
    as a key for decrypting the data of the <emphasis>source device</emphasis>.
    In case of a <emphasis>keyscript</emphasis>, the value of this field is
    given as argument to the keyscript. Values with spaces and special
-   characters need to be quoted.
+   characters need to be escaped using octal sequences, like for
+   <emphasis>fstab(5)</emphasis>.
    Note that the <emphasis>entire</emphasis> key file will be used as the
    passphrase; the passphrase must <emphasis>not</emphasis> be followed by a
    newline character.
@@ -217,7 +218,7 @@
    <varlistentry>
     <term><emphasis>readonly</emphasis>, <emphasis>read-only</emphasis></term>
     <listitem>
-     <simpara>The backing device is read-only (eg: a dvd).</simpara>
+     <simpara>Set up a read-only mapping.</simpara>
     </listitem>
    </varlistentry>
 

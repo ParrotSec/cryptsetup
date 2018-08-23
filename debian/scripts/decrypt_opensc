@@ -12,8 +12,7 @@
 check_card() {
     cardfound=0
 
-    cardtmp=$(/usr/bin/opensc-tool -n 2>&1)
-    if [ $? = 0 ] ; then
+    if /usr/bin/opensc-tool -n 2>&1; then
         cardfound=1
     fi
 }
@@ -23,7 +22,7 @@ wait_card() {
     if [ $cardfound = 0 ] ; then
         echo "Waiting for Smart Card..." >&2
         tries=0
-        while [ $cardfound = 0 -a $tries -lt 60 ] ; do
+        while [ $cardfound = 0 ] && [ $tries -lt 60 ] ; do
             sleep 1
             check_card
             tries=$(($tries + 1))
@@ -38,9 +37,10 @@ wait_card() {
 wait_card
 if [ -x /bin/plymouth ] && plymouth --ping; then
 	# Get pin number from plymouth
-	/usr/bin/pkcs15-crypt --decipher --input $1 --pkcs1 --raw --pin "$(plymouth ask-for-password --prompt "Enter pin for $crypttarget ($cryptsource): ")"
+	/usr/bin/pkcs15-crypt --decipher --input "$1" --pkcs1 --raw \
+		--pin "$(plymouth ask-for-password --prompt "Enter pin for $CRYPTTAB_NAME: ")"
 else
 	# Get pin number from console
-	/usr/bin/pkcs15-crypt --decipher --input $1 --pkcs1 --raw < /dev/console 2>/dev/console
+	/usr/bin/pkcs15-crypt --decipher --input "$1" --pkcs1 --raw </dev/console 2>/dev/console
 fi
 exit $?

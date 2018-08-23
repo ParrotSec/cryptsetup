@@ -8,6 +8,8 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+bindnow,+pie
 DEB_CFLAGS_MAINT_APPEND = -Wall
 include /usr/share/dpkg/architecture.mk
 
+CONFFLAGS =
+
 # Used e.g. for manpages (to build them in a reprodicible way)
 include /usr/share/dpkg/pkg-info.mk
 DEB_DATE := $(strip $(shell LC_ALL=C date -u +%F -d@$(SOURCE_DATE_EPOCH)))
@@ -16,7 +18,7 @@ DEB_DATE := $(strip $(shell LC_ALL=C date -u +%F -d@$(SOURCE_DATE_EPOCH)))
 	dh $@
 
 override_dh_auto_configure:
-	dh_auto_configure -- $(confflags) \
+	dh_auto_configure -- $(CONFFLAGS) \
 		--libdir=/lib/$(DEB_HOST_MULTIARCH) \
 		--sbindir=/sbin \
 		--enable-libargon2 \
@@ -27,8 +29,8 @@ override_dh_auto_build:
 	dh_auto_build
 
 	# build askpass and passdev keyscripts
-	$(CC) -o debian/askpass debian/askpass.c $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -pedantic -std=c99
-	$(CC) -o debian/scripts/passdev debian/scripts/passdev.c $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -pedantic -std=c99
+	$(CC) -o debian/askpass debian/askpass.c $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -pedantic
+	$(CC) -o debian/scripts/passdev debian/scripts/passdev.c $(CFLAGS) $(CPPFLAGS) $(LDFLAGS) -pedantic
 
 	# generate manpages
 	sed 's/VERSION/$(DEB_VERSION)/;s/DATE/$(DEB_DATE)/' \
@@ -56,6 +58,9 @@ ifeq ($(shell dpkg-vendor --is Ubuntu && echo yes),yes)
 	install -m 0644 debian/cryptsetup.apport \
 		$(CURDIR)/debian/cryptsetup-run/usr/share/apport/package-hooks/cryptsetup.py
 endif
+	mv -f $(CURDIR)/debian/cryptsetup-initramfs.preinst $(CURDIR)/debian/cryptsetup-initramfs.preinst~
+	while IFS= read -r x; do if [ "$${x#CONF_HOOK_CONTENTS=}" = "$$x" ]; then printf "%s\n" "$$x"; else printf "CONF_HOOK_CONTENTS=\"\$$(cat <<EOF\n"; cat debian/initramfs/conf-hook; printf "EOF\n)\""; fi ; done <$(CURDIR)/debian/cryptsetup-initramfs.preinst~ >$(CURDIR)/debian/cryptsetup-initramfs.preinst
+	rm -f $(CURDIR)/debian/cryptsetup-initramfs.preinst~
 
 override_dh_link:
 	dh_link

@@ -223,7 +223,7 @@ static int hdr_read_disk(struct device *device, struct luks2_hdr_disk *hdr_disk,
 	size_t hdr_json_size = 0;
 	int devfd = -1, r;
 
-	log_dbg("Trying to read %s LUKS2 header at offset %" PRIu64 ".",
+	log_dbg("Trying to read %s LUKS2 header at offset 0x%" PRIx64 ".",
 		secondary ? "secondary" : "primary", offset);
 
 	devfd = device_open_locked(device, O_RDONLY);
@@ -531,21 +531,71 @@ static json_object *parse_and_validate_json(const char *json_area, int length)
 	return jobj;
 }
 
+static int detect_device_signatures(const char *path)
+{
+	blk_probe_status prb_state;
+	int r;
+	struct blkid_handle *h;
+
+	if (!blk_supported()) {
+		log_dbg("Blkid probing of device signatures disabled.");
+		return 0;
+	}
+
+	if ((r = blk_init_by_path(&h, path))) {
+		log_dbg("Failed to initialize blkid_handle by path.");
+		return -EINVAL;
+	}
+
+	/* We don't care about details. Be fast. */
+	blk_set_chains_for_fast_detection(h);
+
+	/* Filter out crypto_LUKS. we don't care now */
+	blk_superblocks_filter_luks(h);
+
+	prb_state = blk_safeprobe(h);
+
+	switch (prb_state) {
+	case PRB_AMBIGUOUS:
+		log_dbg("Blkid probe couldn't decide device type unambiguously.");
+		/* fall through */
+	case PRB_FAIL:
+		log_dbg("Blkid probe failed.");
+		r = -EINVAL;
+		break;
+	case PRB_OK: /* crypto_LUKS type is filtered out */
+		r = -EINVAL;
+
+		if (blk_is_partition(h))
+			log_dbg("Blkid probe detected partition type '%s'", blk_get_partition_type(h));
+		else if (blk_is_superblock(h))
+			log_dbg("blkid probe detected superblock type '%s'", blk_get_superblock_type(h));
+		break;
+	case PRB_EMPTY:
+		log_dbg("Blkid probe detected no foreign device signature.");
+	}
+	blk_free(h);
+	return r;
+}
+
 /*
  * Read and convert on-disk LUKS2 header to in-memory representation..
  * Try to do recovery if on-disk state is not consistent.
  */
 int LUKS2_disk_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr,
-			struct device *device, int do_recovery)
+			struct device *device, int do_recovery, int do_blkprobe)
 {
 	enum { HDR_OK, HDR_OBSOLETE, HDR_FAIL, HDR_FAIL_IO } state_hdr1, state_hdr2;
 	struct luks2_hdr_disk hdr_disk1, hdr_disk2;
 	char *json_area1 = NULL, *json_area2 = NULL;
 	json_object *jobj_hdr1 = NULL, *jobj_hdr2 = NULL;
-	int i, r;
+	unsigned int i;
+	int r;
 	uint64_t hdr_size;
+	uint64_t hdr2_offsets[] = LUKS2_HDR2_OFFSETS;
 
-	if (do_recovery && !crypt_metadata_locking_enabled()) {
+	/* Skip auto-recovery if locks are disabled and we're not doing LUKS2 explicit repair */
+	if (do_recovery && do_blkprobe && !crypt_metadata_locking_enabled()) {
 		do_recovery = 0;
 		log_dbg("Disabling header auto-recovery due to locking being disabled.");
 	}
@@ -576,8 +626,8 @@ int LUKS2_disk_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr,
 		/*
 		 * No header size, check all known offsets.
 		 */
-		for (r = -EINVAL,i = 2; r < 0 && i <= 1024; i <<= 1)
-			r = hdr_read_disk(device, &hdr_disk2, &json_area2, i * 4096, 1);
+		for (r = -EINVAL,i = 0; r < 0 && i < ARRAY_SIZE(hdr2_offsets); i++)
+			r = hdr_read_disk(device, &hdr_disk2, &json_area2, hdr2_offsets[i], 1);
 
 		if (r == 0) {
 			jobj_hdr2 = parse_and_validate_json(json_area2, be64_to_cpu(hdr_disk2.hdr_size) - LUKS2_HDR_BIN_LEN);
@@ -616,6 +666,12 @@ int LUKS2_disk_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr,
 	if (state_hdr1 == HDR_OK && state_hdr2 != HDR_OK) {
 		log_dbg("Secondary LUKS2 header requires recovery.");
 
+		if (do_blkprobe && (r = detect_device_signatures(device_path(device)))) {
+			log_err(cd, _("Device contains ambiguous signatures, cannot auto-recover LUKS2.\n"
+				      "Please run \"cryptsetup repair\" for recovery."));
+			goto err;
+		}
+
 		if (do_recovery) {
 			memcpy(&hdr_disk2, &hdr_disk1, LUKS2_HDR_BIN_LEN);
 			r = crypt_random_get(NULL, (char*)hdr_disk2.salt, sizeof(hdr_disk2.salt), CRYPT_RND_SALT);
@@ -630,6 +686,12 @@ int LUKS2_disk_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr,
 		}
 	} else if (state_hdr1 != HDR_OK && state_hdr2 == HDR_OK) {
 		log_dbg("Primary LUKS2 header requires recovery.");
+
+		if (do_blkprobe && (r = detect_device_signatures(device_path(device)))) {
+			log_err(cd, _("Device contains ambiguous signatures, cannot auto-recover LUKS2.\n"
+				      "Please run \"cryptsetup repair\" for recovery."));
+			goto err;
+		}
 
 		if (do_recovery) {
 			memcpy(&hdr_disk1, &hdr_disk2, LUKS2_HDR_BIN_LEN);

@@ -18,7 +18,7 @@ else
     device="$1"
 fi
 
-PARAMS="$device -T 1 --use-fsync -B 32"
+PARAMS="$device -T 1 --use-fsync --progress-frequency 5 -B 32"
 if [ "$3" != "any" ]; then
     PARAMS="$PARAMS -S $3"
 fi
@@ -50,10 +50,10 @@ reenc_run() {
 	fi
         /bin/plymouth ask-for-password \
         --prompt "$_prompt" \
-        --command="/sbin/cryptsetup-reencrypt $PARAMS"
+        --command="/sbin/cryptsetup-reencrypt-verbose $PARAMS"
     else
         info "REENCRYPT using key $1"
-        reenc_readkey "$1" | /sbin/cryptsetup-reencrypt -d - $PARAMS
+        reenc_readkey "$1" | /sbin/cryptsetup-reencrypt-verbose -d - $PARAMS
     fi
     _ret=$?
     cd $cwd

@@ -31,13 +31,7 @@ log_action_begin_msg "Stopping crypto disk"
 
 rv=0
 for name in "$@"; do
-    if crypttab_find_target "$name"; then
-        remove_mapping "$CRYPTTAB_NAME" "$CRYPTTAB_OPTIONS" || rv=$?
-    elif cryptsetup status -- "$name" >/dev/null; then
-        remove_mapping "$name" '' || rv=$?
-    else
-        device_msg "$name" "failed, no such device"
-    fi
+    remove_mapping "$name" || rv=$?
 done
 
 log_action_end_msg $rv

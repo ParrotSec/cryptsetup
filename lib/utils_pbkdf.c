@@ -65,8 +65,14 @@ int verify_pbkdf_params(struct crypt_device *cd,
 	const char *pbkdf_type;
 	int r = 0;
 
-	if (!pbkdf->type || !pbkdf->hash || !pbkdf->time_ms)
+	if (!pbkdf->type ||
+	    (!pbkdf->hash && !strcmp(pbkdf->type, "pbkdf2")))
 		return -EINVAL;
+
+	if (!pbkdf->time_ms && !(pbkdf->flags & CRYPT_PBKDF_NO_BENCHMARK)) {
+		log_err(cd, _("Requested PBKDF target time cannot be zero."));
+		return -EINVAL;
+	}
 
 	/* TODO: initialise crypto and check the hash and pbkdf are both available */
 	r = crypt_parse_pbkdf(pbkdf->type, &pbkdf_type);
@@ -120,15 +126,11 @@ int verify_pbkdf_params(struct crypt_device *cd,
 		r = -EINVAL;
 	}
 	if (!pbkdf->max_memory_kb) {
-		log_err(cd, _("Requested maximum PBKDF memory can not be zero."));
+		log_err(cd, _("Requested maximum PBKDF memory cannot be zero."));
 		r = -EINVAL;
 	}
 	if (!pbkdf->parallel_threads) {
-		log_err(cd, _("Requested PBKDF parallel threads can not be zero."));
-		r = -EINVAL;
-	}
-	if (!pbkdf->time_ms) {
-		log_err(cd, _("Requested PBKDF target time can not be zero."));
+		log_err(cd, _("Requested PBKDF parallel threads cannot be zero."));
 		r = -EINVAL;
 	}
 
@@ -165,9 +167,9 @@ int init_pbkdf_type(struct crypt_device *cd,
 	 * It will fail later anyway :-)
 	 */
 	type = strdup(pbkdf->type);
-	hash = strdup(pbkdf->hash);
+	hash = pbkdf->hash ? strdup(pbkdf->hash) : NULL;
 
-	if (!type || !hash) {
+	if (!type || (!hash && pbkdf->hash)) {
 		free(CONST_CAST(void*)type);
 		free(CONST_CAST(void*)hash);
 		return -ENOMEM;

@@ -44,6 +44,7 @@
 #include "lib/utils_loop.h"
 #include "lib/utils_fips.h"
 #include "lib/utils_io.h"
+#include "lib/utils_blkid.h"
 
 #include "libcryptsetup.h"
 
@@ -61,7 +62,6 @@ extern int opt_batch_mode;
 extern int opt_force_password;
 extern int opt_progress_frequency;
 
-
 /* Common tools */
 void clogger(struct crypt_device *cd, int level, const char *file, int line,
 	     const char *format, ...)  __attribute__ ((format (printf, 5, 6)));
@@ -75,6 +75,10 @@ __attribute__ ((noreturn)) \
 void usage(poptContext popt_context, int exitcode, const char *error, const char *more);
 void dbg_version_and_cmd(int argc, const char **argv);
 int translate_errno(int r);
+
+typedef enum { CREATED, UNLOCKED, REMOVED  } crypt_object_op;
+void tools_keyslot_msg(int keyslot, crypt_object_op op);
+void tools_token_msg(int token, crypt_object_op op);
 
 extern volatile int quit;
 void set_int_block(int block);
@@ -101,6 +105,12 @@ int tools_wipe_progress(uint64_t size, uint64_t offset, void *usrptr);
 
 int tools_read_mk(const char *file, char **key, int keysize);
 int tools_write_mk(const char *file, const char *key, int keysize);
+
+int tools_read_json_file(struct crypt_device *cd, const char *file, char **json, size_t *json_size);
+int tools_write_json_file(struct crypt_device *cd, const char *file, const char *json);
+
+int tools_detect_signatures(const char *device, int ignore_luks, size_t *count);
+int tools_wipe_all_signatures(const char *path);
 
 /* Log */
 #define log_dbg(x...) clogger(NULL, CRYPT_LOG_DEBUG, __FILE__, __LINE__, x)

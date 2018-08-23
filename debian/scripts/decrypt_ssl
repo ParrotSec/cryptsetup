@@ -7,11 +7,11 @@
 decrypt_ssl () {
 	echo "" >&2
 	echo "Decrypting ssl key $1..." >&2
-	if ! /usr/bin/openssl enc -aes-256-cbc -d -salt -in $1 2>/dev/null; then
+	if ! /usr/bin/openssl enc -aes-256-cbc -d -salt -in "$1" 2>/dev/null; then
 		return 1
 	fi
 	return 0
 }
 
-decrypt_ssl $1
+decrypt_ssl "$1"
 exit $?

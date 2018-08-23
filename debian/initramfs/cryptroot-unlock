@@ -25,28 +25,31 @@ PASSFIFO=/lib/cryptsetup/passfifo
 ASKPASS=/lib/cryptsetup/askpass
 UNLOCK_ALL=n
 
-CRYPTTAB="/cryptroot/crypttab"
-if [ ! -f "$CRYPTTAB" ] || [ "$CRYPTTAB" -ot "/proc/1" ]; then
+[ -f /lib/cryptsetup/functions ] || return 0
+. /lib/cryptsetup/functions
+TABFILE="/cryptroot/crypttab"
+unset -v IFS
+
+if [ ! -f "$TABFILE" ] || [ "$TABFILE" -ot "/proc/1" ]; then
 	# Too early, init-top/cryptroot hasn't finished yet
 	echo "Try again later" >&2
 	exit 1
 fi
 
-# The list of configured devices to unlock.
-CRYPTDEVS="$(sed -nr 's/^\s*([^#[:blank:]]\S*)\s.*/\1/p' "$CRYPTTAB")"
-
 # Print the list of PIDs the executed command of which is $exe.
 pgrep_exe() {
-	local exe="$1" pid
+	local exe pid
+	exe="$(readlink -f -- "$1" 2>/dev/null)" && [ -f "$exe" ] || return 0
 	ps -eo pid= | while read pid; do
-		[ "$(readlink -f /proc/$pid/exe)" != "$exe" ] || printf '%i\n' "$pid"
+		[ "$(readlink -f "/proc/$pid/exe")" != "$exe" ] || printf '%d\n' "$pid"
 	done
 }
 
 # Return 0 if $pid has a file descriptor pointing to $name, and 1
 # otherwise.
 in_fds() {
-	local pid="$1" name="$2" fd
+	local pid="$1" name fd
+	name="$(readlink -f -- "$2" 2>/dev/null)" && [ -e "$name" ] || return 1
 	for fd in $(find "/proc/$pid/fd" -type l); do
 		[ "$(readlink -f "$fd")" != "$name" ] || return 0
 	done
@@ -68,20 +71,12 @@ get_askpass_pid() {
 
 # Print the number of configured crypt devices that have not been unlocked yet.
 count_locked_devices() {
-	local dev n=0
-	for dev in $CRYPTDEVS; do
-		[ -b "/dev/mapper/$dev" ] || n=$(( $n + 1 ))
-	done
-	echo $n
+	local COUNT=0
+	crypttab_foreach_entry count_locked_devices_callback
+	printf '%d\n' "$COUNT"
 }
-
-# Return 0 if the $target is in $CRYPTDEVS, and 1 otherwise.
-is_device_known() {
-	local dev target="$1"
-	for dev in $CRYPTDEVS; do
-		[ "$dev" != "$target" ] || return 0
-	done
-	return 1
+count_locked_devices_callback() {
+	dm_blkdevname "$CRYPTTAB_NAME" >/dev/null || COUNT=$(( $COUNT + 1 ))
 }
 
 # Wait for askpass, then set $PID (resp. $BIRTH) to the PID (resp.
@@ -115,9 +110,19 @@ wait_for_prompt() {
 	done
 
 	# find the cryptsetup process with same $CRYPTTAB_NAME
-	CRYPTTAB_OPTION_tries=
-	eval $(grep -Ez '^CRYPTTAB_(NAME|TRIED|SOURCE|OPTION_tries)=' "/proc/$pid/environ" | tr '\0' '\n')
-	if ! is_device_known "$CRYPTTAB_NAME"; then
+	local o v
+	for o in NAME TRIED OPTION_tries; do
+		if v="$(grep -z -m1 "^CRYPTTAB_$o=" "/proc/$pid/environ")"; then
+			eval "CRYPTTAB_$o"="\${v#CRYPTTAB_$o=}"
+		else
+			eval unset -v "CRYPTTAB_$o"
+		fi
+	done
+	if [ -z "${CRYPTTAB_NAME:+x}" ] || [ -z "${CRYPTTAB_TRIED:+x}" ]; then
+		return 1
+	fi
+	if ( ! crypttab_find_entry --quiet "$CRYPTTAB_NAME" ); then
+		# use a subshell to avoid polluting our enironment
 		echo "Error: Refusing to process unknown device $CRYPTTAB_NAME" >&2
 		exit 1
 	fi
@@ -125,7 +130,7 @@ wait_for_prompt() {
 	for pid in $(pgrep_exe "/sbin/cryptsetup"); do
 		if grep -Fxqz "CRYPTTAB_NAME=$CRYPTTAB_NAME" "/proc/$pid/environ"; then
 			PID=$pid
-			BIRTH=$(stat -c'%Z' "/proc/$PID")
+			BIRTH=$(stat -c"%Z" "/proc/$PID" 2>/dev/null) || break
 			return 0
 		fi
 	done
@@ -141,8 +146,8 @@ wait_for_prompt() {
 # maximum number of tries exceeded.  Otherwise (if the unlocking
 # failed), return with value 1.
 wait_for_answer() {
-	local timer=$(( 10 * $TIMEOUT )) dev
-	until [ ! -d "/proc/$PID" ] || [ $(stat -c'%Z' "/proc/$PID") -gt $BIRTH ]; do
+	local timer=$(( 10 * $TIMEOUT )) b
+	while [ -d "/proc/$PID" ] && b=$(stat -c"%Z" "/proc/$PID" 2>/dev/null) && [ $b -le $BIRTH ]; do
 		usleep 100000
 		timer=$(( $timer - 1 ))
 		if [ $timer -le 0 ]; then
@@ -151,10 +156,11 @@ wait_for_answer() {
 		fi
 	done
 
-	if [ -b "/dev/mapper/$CRYPTTAB_NAME" ]; then
+	if dm_blkdevname "$CRYPTTAB_NAME" >/dev/null; then
 		echo "cryptsetup: $CRYPTTAB_NAME set up successfully" >&2
 		[ "$UNLOCK_ALL" = y ] && return 0 || exit 0
-	elif [ $(( ${CRYPTTAB_TRIED:-0} + 1 )) -ge ${CRYPTTAB_OPTION_tries:-3} ]; then
+	elif [ $(( ${CRYPTTAB_TRIED:-0} + 1 )) -ge ${CRYPTTAB_OPTION_tries:-3} ] &&
+			[ ${CRYPTTAB_OPTION_tries:-3} -gt 0 ]; then
 		echo "cryptsetup: maximum number of tries exceeded for $CRYPTTAB_NAME" >&2
 		exit 1
 	else
@@ -171,14 +177,17 @@ if [ -t 0 ] && [ -x "$ASKPASS" ]; then
 	while :; do
 		# note: if the script is not killed before pivot_root it should
 		# exit on its own once $TIMEOUT is reached
-		wait_for_prompt || continue
+		if ! wait_for_prompt; then
+			usleep 100000
+			continue
+		fi
 		read -rs -p "Please unlock disk $CRYPTTAB_NAME: "; echo
 		printf '%s' "$REPLY" >"$PASSFIFO"
 		wait_for_answer || true
 	done
 else
 	# non-interactive mode: slurp the passphrase from stdin and exit
-	wait_for_prompt || continue
+	wait_for_prompt || exit 1
 	echo "Please unlock disk $CRYPTTAB_NAME"
 	cat >"$PASSFIFO"
 	wait_for_answer || exit 1

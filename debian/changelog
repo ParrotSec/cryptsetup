@@ -1,3 +1,127 @@
+cryptsetup (2:2.0.4-2parrot1) testing; urgency=medium
+
+  * Import new Debian release.
+  * Import NUKE patch from Kali.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Thu, 23 Aug 2018 04:51:35 +0200
+
+cryptsetup (2:2.0.4-2) unstable; urgency=medium
+
+  * debian/cryptsetup-initramfs.preinst: Don't try to overwrite
+    /etc/cryptsetup-initramfs/conf-hook if that file doesn't exist.  (The fix
+    for #905188 broke 2:2.0.4-1's instability on sid.)  Closes: #905514.
+  * debian/control: Bump Standards-Version to 4.2.0 (no changes necessary).
+
+ -- Guilhem Moulin <guilhem@debian.org>  Tue, 07 Aug 2018 17:25:30 +0200
+
+cryptsetup (2:2.0.4-1) unstable; urgency=medium
+
+  * New upstream release.  Add 'libblkid-dev' to Build-Depends since
+    libcryptsetup and utilities are now linked to libblkid.
+  * debian/cryptsetup-initramfs.preinst: Improve conffile ownership transfer
+    from 'cryptsetup' to 'cryptsetup-initramfs' to comply with Policy §10.7.3.
+    (Closes: #905188.)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sun, 05 Aug 2018 04:59:10 +0800
+
+cryptsetup (2:2.0.3-7) unstable; urgency=medium
+
+  * debian/scripts/gen-ssl-key: avoid storing temporary key file on disk.
+  * debian/initramfs/*, debian/scripts/*: improve quoting.
+  * debian/initramfs/cryptroot-unlock: Normalize paths before comparison.
+    This fixes usage on initramfs images with an usrmerge layout, such as
+    images made by mkinitramfs(8) from initramfs-tools-core 0.132. (Closes:
+    #904926.)
+  * debian/functions: crypttab_find_entry(), crypttab_foreach_entry(): return
+    gracefully if $TABFILE doesn't exist.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Mon, 30 Jul 2018 16:32:07 +0800
+
+cryptsetup (2:2.0.3-6) unstable; urgency=medium
+
+  * debian/TODO.md: Remove mention of parent device detection for mdadm
+    (#629236) as it's fixed since 2:2.0.3-2.
+  * debian/README.gnupg, debian/TODO.md, debian/doc/crypttab.xml: minor typo
+    fixes.
+  * debian/rules, debian/patches/disable-internal-tests.patch: Remove patch to
+    add configure flag '--disable-internal-tests'.  The internal test suite is
+    run by dh_auto_test(1), and it is skipped if DEB_BUILD_OPTIONS environment
+    variable contains the string "nocheck".
+  * debian/cryptdisks-functions, debian/initramfs/scripts/local-top/cryptroot:
+    When the 2nd column of a crypttab entry denodes a block special device,
+    resolve the device but don't convert it to /dev/block/$major:$minor.
+    (Closes: #903246.)
+  * debian/initramfs/hooks/cryptroot:
+    + Treat null device numbers as invalid in resolve_device(), cf.
+      /Documentation/admin-guide/devices.txt in the kernel source tree.
+    + generate_initrd_crypttab(): add '\n' to the local IFS since
+      get_resume_devno() prints one major:minor pair per line.
+  * debian/initramfs/scripts/local-{top,bottom}/cryptopensc:
+    + Save process ID of the pcscd daemon at local-top stage, and kill it at
+      local-bottom stage.  Thanks to Pascal Vibet for the patch.
+      (Closes: #903574.)
+    + Fix path to the pcscd executable (the fix for #880750 was incomplete).
+  * debian/README.opensc: Remove mention of 'README.openct.gz' as it's gone
+    since 2:2.0.3-2.
+  * debian/scripts/decrypt_opensc: Fix plymouth prompt message (use
+    $CRYPTTAB_NAME not $crypttarget).
+
+ -- Guilhem Moulin <guilhem@debian.org>  Fri, 13 Jul 2018 22:10:43 +0200
+
+cryptsetup (2:2.0.3-5) unstable; urgency=medium
+
+  [ Jonas Meurer ]
+  * debian/askpass.c, debian/scripts/passdev.c, debian/rules:
+    + Drop _BSD_SOURCE in favor of _DEFAULT_SOURCE
+    + Drop c99 std, as the default is now higher than that
+  * debian/control:
+    + Drop explicit dependencies on libgcrypt20 and libgpg-error0 from
+      libcryptsetup12. They're pulled in by ${shlibs:Depends} automatically.
+
+  [ Guilhem Moulin ]
+  * debian/initramfs/cryptroot-unlock: Keep looping forever (as long as the
+    disk is locked) if the CRYPTTAB_OPTION_tries variable is set to 0, cf.
+    crypttab(5).
+  * debian/doc/crypttab.xml: Clarify that the 'readonly' flag sets up a
+    read-only mapping.  Cf. `cryptsetup --readonly`.
+  * debian/initramfs/hooks/cryptroot:
+    + Fix generation of initrd crypttab(5) with `update-initramfs -u -v` for
+      key files matching $KEYFILE_PATTERN, or when a 'keyscript' is specified
+      in the crypttab options.  Regression since 2:2.0.3-2. (Closes: #902733.)
+    + Avoid processing entries multiple times in get_crypttab_entry(), which
+      could happen with 'keyscript=decrypt_derived' for instance.
+    + Don't complain that the sysfs dir can't be found when the hook failed to
+      normalize the device (another warning is shown already).
+    + If source device is mapped (for instance if it's a logical volume), put
+      its dm name into the initrd crypttab.  LVM2's local-block script doesn't
+      work with UUIDs, and giving it a VG+LV is better anyway as we avoid to
+      activate all volumes at initramfs stage. (Closes: #902943.)
+  * debian/initramfs/conf-hook: Clarify that if KEYFILE_PATTERN if null or
+    unset then no key file is copied.
+  * debian/initramfs/*, debian/functions, debian/cryptdisks-functions:
+    + Use major:minor device IDs internally, as this facilitate discovery of
+      sysfs directories, and we don't have to take care of the udev mangling.
+    + Decode octal sequences when reading /etc/crypttab or /etc/fstab.  This
+      means that key files and option values can contain blanks and special
+      characters encoded as octal sequences.
+    + Refactor crypttab(5) parsing logic, to avoid duplication of boilerplate
+      code.
+  * debian/functions: If the key file is a symlink, warn about insecure
+    permissions of the target, not the link itself.
+  * debian/scripts/decrypt_derived: For devices with keys in the kernel
+    keyring (e.g., LUKS2 by default), refuse to derive anything.
+  * debian/patches/disable-internal-tests.patch: Add configure option
+    '--disable-internal-tests' to disable the internal test suite.
+  * debian/rules: Don't run upstream's internal test suite if
+    $DEB_BUILD_OPTIONS contains the string "skip-internal-tests".  (Tests are
+    still run by default.)
+  * debian/cryptdisks-functions: Restore support for crypttab(5) entries with
+    regular files as source device.  Regression since 2:2.0.3-2.
+    (Closes: #902879.)
+  * debian/control: Bump Standards-Version to 4.1.5 (no changes necessary).
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sat, 07 Jul 2018 01:47:57 +0200
+
 cryptsetup (2:2.0.3-4parrot1) testing; urgency=medium
 
   * Import NUKE patch.

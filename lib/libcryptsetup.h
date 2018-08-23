@@ -546,8 +546,8 @@ int crypt_format(struct crypt_device *cd,
  *
  * @note Currently, only LUKS1->LUKS2 and LUKS2->LUKS1 conversions are supported.
  *	 Not all LUKS2 devices may be converted back to LUKS1. To make such a conversion
- *	 posible all active LUKS2 keyslots must be in LUKS1 compatible mode (i.e. pbkdf
- *	 type must be PBKDF2) and device cannot be formated with any authenticated
+ *	 possible all active LUKS2 keyslots must be in LUKS1 compatible mode (i.e. pbkdf
+ *	 type must be PBKDF2) and device cannot be formatted with any authenticated
  *	 encryption mode.
  *
  * @note Device must be offline for conversion. UUID change is not possible for active
@@ -624,7 +624,7 @@ int crypt_load(struct crypt_device *cd,
 	void *params);
 
 /**
- * Try to repair crypt device LUKS1 on-disk header if invalid.
+ * Try to repair crypt device LUKS on-disk header if invalid.
  *
  * @param cd crypt device handle
  * @param requested_type @link crypt-type @endlink or @e NULL for all known
@@ -632,9 +632,11 @@ int crypt_load(struct crypt_device *cd,
  *
  * @returns 0 on success or negative errno value otherwise.
  *
- * @note Does not support LUKS2 devices explicitly. LUKS2 header is auto-repaired
- *	 (if exactly one header checksum does not match) automatically on
- *	 crypt_load().
+ * @note For LUKS2 device crypt_repair bypass blkid checks and
+ * 	 perform auto-recovery even though there're third party device
+ * 	 signatures found by blkid probes. Currently the crypt_repair on LUKS2
+ * 	 works only if exactly one header checksum does not match or exactly
+ * 	 one header is missing.
  */
 int crypt_repair(struct crypt_device *cd,
 	const char *requested_type,
@@ -1034,7 +1036,7 @@ typedef enum {
  * 	 stored persistently.
  *
  * @note Only requirements flags recognised by current library may be set.
- *	 CRYPT_REQUIREMENT_FLAG is illegal (output only) in set operation.
+ *	 CRYPT_REQUIREMENT_UNKNOWN is illegal (output only) in set operation.
  */
 int crypt_persistent_flags_set(struct crypt_device *cd,
 	crypt_flags_type type,
@@ -1614,17 +1616,20 @@ void crypt_set_debug_level(int level);
  * @param keyfile keyfile to read
  * @param key buffer for key
  * @param key_size_read size of read key
- * @param keyfile_offset keyfile offset
- * @param keyfile_size_max maximal size of keyfile to read
+ * @param keyfile_offset key offset in keyfile
+ * @param key_size exact key length to read from file or 0
  * @param flags keyfile read flags
  *
  * @return @e 0 on success or negative errno value otherwise.
+ *
+ * @note If key_size is set to zero we read internal max length
+ * 	 and actual size read is returned via key_size_read parameter.
  */
 int crypt_keyfile_device_read(struct crypt_device *cd,
 	const char *keyfile,
 	char **key, size_t *key_size_read,
 	uint64_t keyfile_offset,
-	size_t keyfile_size_max,
+	size_t key_size,
 	uint32_t flags);
 
 /**
@@ -1634,7 +1639,7 @@ int crypt_keyfile_read(struct crypt_device *cd,
 	const char *keyfile,
 	char **key, size_t *key_size_read,
 	size_t keyfile_offset,
-	size_t keyfile_size_max,
+	size_t key_size,
 	uint32_t flags);
 
 /** Read key only to the first end of line (\\n). */
@@ -1881,7 +1886,7 @@ typedef void (*crypt_token_buffer_free_func) (void *buffer, size_t buffer_len);
 
 /**
  * Token handler validate function prototype.
- * This fuction validates JSON representation of user defined token for additional data
+ * This function validates JSON representation of user defined token for additional data
  * specific for its token type. If defined in the handler, it's called
  * during @link crypt_activate_by_token @endlink. It may also be called during
  * @link crypt_token_json_set @endlink when appropriate token handler was registered before
@@ -1894,7 +1899,7 @@ typedef int (*crypt_token_validate_func) (struct crypt_device *cd, const char *j
 
 /**
  * Token handler dump function prototype.
- * This fuction is supposed to print token implementation specific details. It gets
+ * This function is supposed to print token implementation specific details. It gets
  * called during @link crypt_dump @endlink if token handler was registered before.
  *
  * @param cd crypt device handle

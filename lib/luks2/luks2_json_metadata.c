@@ -429,6 +429,7 @@ int LUKS2_token_validate(json_object *hdr_jobj, json_object *jobj_token, const c
 {
 	json_object *jarr, *jobj_keyslots;
 
+	/* keyslots are not yet validated, but we need to know token doesn't reference missing keyslot */
 	if (!json_object_object_get_ex(hdr_jobj, "keyslots", &jobj_keyslots))
 		return 1;
 
@@ -505,12 +506,66 @@ static int hdr_validate_tokens(json_object *hdr_jobj)
 	return 0;
 }
 
+static int hdr_validate_crypt_segment(json_object *jobj, const char *key, json_object *jobj_digests,
+	uint64_t offset, uint64_t size)
+{
+	json_object *jobj_ivoffset, *jobj_sector_size, *jobj_integrity;
+	uint32_t sector_size;
+	uint64_t ivoffset;
+
+	if (!(jobj_ivoffset = json_contains(jobj, key, "Segment", "iv_tweak", json_type_string)) ||
+	    !json_contains(jobj, key, "Segment", "encryption", json_type_string) ||
+	    !(jobj_sector_size = json_contains(jobj, key, "Segment", "sector_size", json_type_int)))
+		return 1;
+
+	/* integrity */
+	if (json_object_object_get_ex(jobj, "integrity", &jobj_integrity)) {
+		if (!json_contains(jobj, key, "Segment", "integrity", json_type_object) ||
+		    !json_contains(jobj_integrity, key, "Segment integrity", "type", json_type_string) ||
+		    !json_contains(jobj_integrity, key, "Segment integrity", "journal_encryption", json_type_string) ||
+		    !json_contains(jobj_integrity, key, "Segment integrity", "journal_integrity", json_type_string))
+			return 1;
+	}
+
+	/* enforce uint32_t type */
+	if (!validate_json_uint32(jobj_sector_size)) {
+		log_dbg("Illegal field \"sector_size\":%s.",
+			json_object_get_string(jobj_sector_size));
+		return 1;
+	}
+
+	sector_size = json_object_get_uint32(jobj_sector_size);
+	if (!sector_size || sector_size % SECTOR_SIZE) {
+		log_dbg("Illegal sector size: %" PRIu32, sector_size);
+		return 1;
+	}
+
+	if (!numbered("iv_tweak", json_object_get_string(jobj_ivoffset)) ||
+	    !json_str_to_uint64(jobj_ivoffset, &ivoffset))
+		return 1;
+
+	if (offset % sector_size) {
+		log_dbg("Offset field has to be aligned to sector size: %" PRIu32, sector_size);
+		return 1;
+	}
+
+	if (ivoffset % sector_size) {
+		log_dbg("IV offset field has to be aligned to sector size: %" PRIu32, sector_size);
+		return 1;
+	}
+
+	if (size % sector_size) {
+		log_dbg("Size field has to be aligned to sector size: %" PRIu32, sector_size);
+		return 1;
+	}
+
+	return !segment_has_digest(key, jobj_digests);
+}
+
 static int hdr_validate_segments(json_object *hdr_jobj)
 {
-	json_object *jobj, *jobj_digests, *jobj_offset, *jobj_ivoffset,
-		    *jobj_length, *jobj_sector_size, *jobj_type, *jobj_integrity;
-	uint32_t sector_size;
-	uint64_t ivoffset, offset, length;
+	json_object *jobj, *jobj_digests, *jobj_offset, *jobj_size, *jobj_type;
+	uint64_t offset, size;
 
 	if (!json_object_object_get_ex(hdr_jobj, "segments", &jobj)) {
 		log_dbg("Missing segments section.");
@@ -530,70 +585,37 @@ static int hdr_validate_segments(json_object *hdr_jobj)
 		if (!numbered("Segment", key))
 			return 1;
 
-		if (!json_contains(val, key, "Segment", "type", json_type_string) ||
+		/* those fields are mandatory for all segment types */
+		if (!(jobj_type =   json_contains(val, key, "Segment", "type",   json_type_string)) ||
 		    !(jobj_offset = json_contains(val, key, "Segment", "offset", json_type_string)) ||
-		    !(jobj_ivoffset = json_contains(val, key, "Segment", "iv_tweak", json_type_string)) ||
-		    !(jobj_length = json_contains(val, key, "Segment", "size", json_type_string)) ||
-		    !json_contains(val, key, "Segment", "encryption", json_type_string) ||
-		    !(jobj_sector_size = json_contains(val, key, "Segment", "sector_size", json_type_int)))
+		    !(jobj_size =   json_contains(val, key, "Segment", "size",   json_type_string)))
 			return 1;
-
-		/* integrity */
-		if (json_object_object_get_ex(val, "integrity", &jobj_integrity)) {
-			if (!json_contains(val, key, "Segment", "integrity", json_type_object) ||
-			    !json_contains(jobj_integrity, key, "Segment integrity", "type", json_type_string) ||
-			    !json_contains(jobj_integrity, key, "Segment integrity", "journal_encryption", json_type_string) ||
-			    !json_contains(jobj_integrity, key, "Segment integrity", "journal_integrity", json_type_string))
-				return 1;
-		}
-
-		/* enforce uint32_t type */
-		if (!validate_json_uint32(jobj_sector_size)) {
-			log_dbg("Illegal field \"sector_size\":%s.",
-				json_object_get_string(jobj_sector_size));
-			return 1;
-		}
-
-		sector_size = json_object_get_uint32(jobj_sector_size);
-		if (!sector_size || sector_size % 512) {
-			log_dbg("Illegal sector size: %" PRIu32, sector_size);
-			return 1;
-		}
 
 		if (!numbered("offset", json_object_get_string(jobj_offset)) ||
-		    !numbered("iv_tweak", json_object_get_string(jobj_ivoffset)))
+		    !json_str_to_uint64(jobj_offset, &offset))
 			return 1;
 
-		/* rule out values > UINT64_MAX */
-		if (!json_str_to_uint64(jobj_offset, &offset) ||
-		    !json_str_to_uint64(jobj_ivoffset, &ivoffset))
-			return 1;
-
-		if (offset % sector_size) {
-			log_dbg("Offset field has to be aligned to sector size: %" PRIu32, sector_size);
-			return 1;
-		}
-
-		if (ivoffset % sector_size) {
-			log_dbg("IV offset field has to be aligned to sector size: %" PRIu32, sector_size);
-			return 1;
-		}
-
-		/* length "dynamic" means whole device starting at 'offset' */
-		if (strcmp(json_object_get_string(jobj_length), "dynamic")) {
-			if (!numbered("size", json_object_get_string(jobj_length)) ||
-			    !json_str_to_uint64(jobj_length, &length))
+		/* size "dynamic" means whole device starting at 'offset' */
+		if (strcmp(json_object_get_string(jobj_size), "dynamic")) {
+			if (!numbered("size", json_object_get_string(jobj_size)) ||
+			    !json_str_to_uint64(jobj_size, &size) || !size)
 				return 1;
+		} else
+			size = 0;
 
-			if (length % sector_size) {
-				log_dbg("Length field has to be aligned to sector size: %" PRIu32, sector_size);
-				return 1;
-			}
+		/* all device-mapper devices are aligned to 512 sector size */
+		if (offset % SECTOR_SIZE) {
+			log_dbg("Offset field has to be aligned to sector size: %" PRIu32, SECTOR_SIZE);
+			return 1;
+		}
+		if (size % SECTOR_SIZE) {
+			log_dbg("Size field has to be aligned to sector size: %" PRIu32, SECTOR_SIZE);
+			return 1;
 		}
 
-		json_object_object_get_ex(val, "type", &jobj_type);
+		/* crypt */
 		if (!strcmp(json_object_get_string(jobj_type), "crypt") &&
-		    !segment_has_digest(key, jobj_digests))
+		    hdr_validate_crypt_segment(val, key, jobj_digests, offset, size))
 			return 1;
 	}
 
@@ -610,6 +632,7 @@ static int hdr_validate_areas(json_object *hdr_jobj)
 	if (!json_object_object_get_ex(hdr_jobj, "keyslots", &jobj_keyslots))
 		return 1;
 
+	/* segments are already validated */
 	if (!json_object_object_get_ex(hdr_jobj, "segments", &jobj_segments))
 		return 1;
 
@@ -674,11 +697,11 @@ static int hdr_validate_digests(json_object *hdr_jobj)
 		return 1;
 	}
 
-	/* keyslots should already be validated */
+	/* keyslots are not yet validated, but we need to know digest doesn't reference missing keyslot */
 	if (!json_object_object_get_ex(hdr_jobj, "keyslots", &jobj_keyslots))
 		return 1;
 
-	/* segments are not validated atm, but we need to know digest doesn't reference missing segment */
+	/* segments are not yet validated, but we need to know digest doesn't reference missing segment */
 	if (!json_object_object_get_ex(hdr_jobj, "segments", &jobj_segments))
 		return 1;
 
@@ -813,10 +836,10 @@ int LUKS2_hdr_validate(json_object *hdr_jobj)
 	struct {
 		int (*validate)(json_object *);
 	} checks[] = {
-		{ hdr_validate_keyslots },
 		{ hdr_validate_tokens   },
 		{ hdr_validate_digests  },
 		{ hdr_validate_segments },
+		{ hdr_validate_keyslots },
 		{ hdr_validate_areas    },
 		{ hdr_validate_config   },
 		{ NULL }
@@ -842,7 +865,8 @@ int LUKS2_hdr_validate(json_object *hdr_jobj)
 	return 0;
 }
 
-int LUKS2_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr)
+/* FIXME: should we expose do_recovery parameter explicitly? */
+int LUKS2_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr, int repair)
 {
 	int r;
 
@@ -853,7 +877,7 @@ int LUKS2_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr)
 		return r;
 	}
 
-	r = LUKS2_disk_hdr_read(cd, hdr, crypt_metadata_device(cd), 1);
+	r = LUKS2_disk_hdr_read(cd, hdr, crypt_metadata_device(cd), 1, !repair);
 	if (r == -EAGAIN) {
 		/* unlikely: auto-recovery is required and failed due to read lock being held */
 		device_read_unlock(crypt_metadata_device(cd));
@@ -865,7 +889,7 @@ int LUKS2_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr)
 			return r;
 		}
 
-		r = LUKS2_disk_hdr_read(cd, hdr, crypt_metadata_device(cd), 1);
+		r = LUKS2_disk_hdr_read(cd, hdr, crypt_metadata_device(cd), 1, !repair);
 
 		device_write_unlock(crypt_metadata_device(cd));
 	} else
@@ -1050,7 +1074,7 @@ int LUKS2_hdr_restore(struct crypt_device *cd, struct luks2_hdr *hdr,
 		return r;
 	}
 
-	r = LUKS2_disk_hdr_read(cd, &hdr_file, backup_device, 0);
+	r = LUKS2_disk_hdr_read(cd, &hdr_file, backup_device, 0, 0);
 	device_read_unlock(backup_device);
 	device_free(backup_device);
 
@@ -1089,7 +1113,7 @@ int LUKS2_hdr_restore(struct crypt_device *cd, struct luks2_hdr *hdr,
 	close(devfd);
 	devfd = -1;
 
-	r = LUKS2_hdr_read(cd, &tmp_hdr);
+	r = LUKS2_hdr_read(cd, &tmp_hdr, 0);
 	if (r == 0) {
 		log_dbg("Device %s already contains LUKS2 header, checking UUID and requirements.", device_path(device));
 		r = LUKS2_config_get_requirements(cd, &tmp_hdr, &reqs);
@@ -1176,7 +1200,7 @@ out:
 
 	if (!r) {
 		LUKS2_hdr_free(hdr);
-		r = LUKS2_hdr_read(cd, hdr);
+		r = LUKS2_hdr_read(cd, hdr, 1);
 	}
 
 	return r;
@@ -1540,11 +1564,11 @@ static void hdr_dump_segments(struct crypt_device *cd, json_object *hdr_jobj)
 			log_std(cd, "\tlength: %" PRIu64 " [bytes]\n", value);
 		}
 
-		json_object_object_get_ex(val, "encryption", &jobj3);
-		log_std(cd, "\tcipher: %s\n", json_object_get_string(jobj3));
+		if (json_object_object_get_ex(val, "encryption", &jobj3))
+			log_std(cd, "\tcipher: %s\n", json_object_get_string(jobj3));
 
-		json_object_object_get_ex(val, "sector_size", &jobj3);
-		log_std(cd, "\tsector: %" PRIu32 " [bytes]\n", json_object_get_uint32(jobj3));
+		if (json_object_object_get_ex(val, "sector_size", &jobj3))
+			log_std(cd, "\tsector: %" PRIu32 " [bytes]\n", json_object_get_uint32(jobj3));
 
 		if (json_object_object_get_ex(val, "integrity", &jobj2) &&
 		    json_object_object_get_ex(jobj2, "type", &jobj3))
@@ -1626,10 +1650,12 @@ const char *LUKS2_get_cipher(struct luks2_hdr *hdr, int segment)
 	if (!json_object_object_get_ex(jobj1, buf, &jobj2))
 		return NULL;
 
-	if (!json_object_object_get_ex(jobj2, "encryption", &jobj3))
-		return NULL;
+	if (json_object_object_get_ex(jobj2, "encryption", &jobj3))
+		return json_object_get_string(jobj3);
 
-	return json_object_get_string(jobj3);
+	/* FIXME: default encryption (for other segment types) must be string here. */
+	return "null";
+
 }
 
 static int luks2_keyslot_af_params(json_object *jobj_af, struct luks2_keyslot_params *params)

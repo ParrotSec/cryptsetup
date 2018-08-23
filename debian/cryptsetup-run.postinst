@@ -16,51 +16,15 @@ set -e
 
 case "$1" in
     configure)
-	for file in cryptdisks_start cryptdisks_stop; do
-		if [ ! -e /usr/sbin/$file ]; then
-			ln -s /sbin/$file /usr/sbin/$file
-		fi
-	done
+        for file in cryptdisks_start cryptdisks_stop; do
+           if [ ! -e "/usr/sbin/$file" ]; then
+               ln -s "/sbin/$file" "/usr/sbin/$file"
+           fi
+        done
 
-	# Do a number of checks on the currently installed crypttab
-
-	egrep -v "^[[:space:]]*(#|$)" /etc/crypttab | while read dst src key opts; do
-		if [ -z "$dst" ]; then
-			continue
-		elif [ -z "$src" ] || [ -z "$key" ] || [ -z "$opts" ]; then
-			# All fields must be present
-			echo "WARNING: $dst in /etc/crypttab is missing some arguments, see man cryptab(5)." >&2
-			continue
-		else
-			# Strip comments - https://bugs.launchpad.net/bugs/185380
-			opts=$(echo -n $opts | sed 's/ *#.*//')
-			plainopts="0"
-			IFS=','
-			for opt in $opts; do
-				PARAM=$(echo "$opt" | sed 's/=.*//')
-				case "$PARAM" in
-				# Some options are deprecated
-				gpg)
-					echo "WARNING: $dst in /etc/crypttab uses the deprecated gpg option, see man crypttab(5)." >&2
-					;;
-				ssl)
-					echo "WARNING: $dst in /etc/crypttab uses the deprecated ssl option, see man crypttab(5)." >&2
-					;;
-				luks)
-					plainopts="2"
-					;;
-				cipher|size)
-					plainopts="$(($plainopts+1))"
-					;;
-				esac
-			done
-			if [ "$plainopts" -lt 2 ]; then
-				echo "WARNING: you need to set both cipher and size for the plain dm-crypt mapping $dst in /etc/crypttab." >&2
-			fi
-			unset IFS
-		fi
-
-	done
+        # Do a number of checks on the currently installed crypttab
+        . /lib/cryptsetup/functions
+        crypttab_foreach_entry crypttab_parse_options || true
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)

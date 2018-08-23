@@ -2,8 +2,7 @@ opensc/pcscd with cryptsetup and LUKS on Debian
 ------------------------------------------------------------------------
 
 This is an overview on how you can make use of cryptsetup with your
-smartcard device supported by opensc/pcscd. If your reader is supported
-by openct please refer to the README.openct.gz in the cryptsetup docs.
+smartcard device supported by opensc/pcscd.
 
 I assume that you already have an initialized smartcard with a RSA key
 that has the proper X509 properties for encryption set. To generate such
@@ -112,7 +111,7 @@ Edit /usr/share/initramfs-tools/scripts/local-bottom/cryptopensc and
 binary in /usr/local/sbin/pcscd instead of /usr/sbin/pcscd and change
 the path in the existence test to:
 
-	if [ ! -e /usr/local/sbin/pcscd ]; then
+	if [ ! -x /usr/local/sbin/pcscd ]; then
 		exit 0
 	fi
 

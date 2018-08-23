@@ -50,7 +50,7 @@ function remove_mapping()
 	[ -b /dev/mapper/$DEV_NAME2 ] && dmsetup remove $DEV_NAME2 >/dev/null 2>&1
 	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove $DEV_NAME >/dev/null 2>&1
 	losetup -d $LOOPDEV >/dev/null 2>&1
-	rm -f $ORIG_IMG $IMG $IMG10 $KEY1 $KEY2 $KEY5 $KEYE $HEADER_IMG $VK_FILE >/dev/null 2>&1
+	rm -f $ORIG_IMG $IMG $IMG10 $KEY1 $KEY2 $KEY5 $KEYE $HEADER_IMG $VK_FILE missing-file >/dev/null 2>&1
 }
 
 function force_uevent()
@@ -171,6 +171,8 @@ function valgrind_run()
 	INFOSTRING="$(basename ${BASH_SOURCE[1]})-line-${BASH_LINENO[0]}" ./valg.sh ${CRYPTSETUP_VALGRIND} "$@"
 }
 
+export LANG=C
+
 [ -n "$VALG" ] && valgrind_setup && CRYPTSETUP=valgrind_run
 
 # LUKS non-root-tests
@@ -187,7 +189,7 @@ echo $PWD0 | $CRYPTSETUP luksOpen $IMG --test-passphrase 2>/dev/null && fail
 [ $? -ne 2 ] && fail "luksOpen should return EPERM exit code"
 echo $PWD1 | $CRYPTSETUP luksOpen $IMG --test-passphrase || fail
 echo "[3] add key"
-echo $PWD1 | $CRYPTSETUP luksAddKey $IMG $FAST_PBKDF_OPT && fail
+echo $PWD1 | $CRYPTSETUP luksAddKey $IMG $FAST_PBKDF_OPT 2>/dev/null && fail
 echo -e "$PWD1\n$PWD2" | $CRYPTSETUP luksAddKey $IMG $FAST_PBKDF_OPT || fail
 echo -e "$PWD0\n$PWD1" | $CRYPTSETUP luksAddKey $IMG $FAST_PBKDF_OPT 2>/dev/null && fail
 echo "[4] change key"
@@ -207,7 +209,7 @@ echo $PWD2 | $CRYPTSETUP luksOpen $IMG --test-passphrase 2>/dev/null && fail
 [ $? -ne 2 ] && fail "luksOpen should return EPERM exit code"
 echo "[6] kill slot"
 # format new luks device with active keys PWD1, PWD2
-echo $PWD1 | $CRYPTSETUP luksFormat --type luks1 $IMG $FAST_PBKDF_OPT || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $IMG $FAST_PBKDF_OPT || fail
 echo -e "$PWD1\n$PWD2" | $CRYPTSETUP luksAddKey $IMG $FAST_PBKDF_OPT || fail
 # deactivate keys by killing slots
 $CRYPTSETUP luksDump $IMG | grep -q "Key Slot 0: ENABLED" || fail
@@ -224,7 +226,7 @@ $CRYPTSETUP luksDump $IMG | grep -q "Key Slot 1: DISABLED" || fail
 echo $PWD1 | $CRYPTSETUP luksOpen $IMG --test-passphrase 2>/dev/null && fail
 echo $PWD2 | $CRYPTSETUP luksOpen $IMG --test-passphrase 2>/dev/null && fail
 echo "[7] header backup"
-echo $PWD1 | $CRYPTSETUP luksFormat --type luks1 $IMG $FAST_PBKDF_OPT || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $IMG $FAST_PBKDF_OPT || fail
 $CRYPTSETUP luksHeaderBackup $IMG --header-backup-file $HEADER_IMG || fail
 echo $PWD1 | $CRYPTSETUP luksRemoveKey $IMG || fail
 echo $PWD1 | $CRYPTSETUP luksOpen $IMG --test-passphrase 2>/dev/null && fail
@@ -463,7 +465,7 @@ $CRYPTSETUP luksDump $LOOPDEV | grep -q "Key Slot 2: ENABLED" || fail
 echo $PWD2 | $CRYPTSETUP luksKillSlot $LOOPDEV 2 || fail
 $CRYPTSETUP luksDump $LOOPDEV | grep -q "Key Slot 2: DISABLED" || fail
 # kill slot with redirected stdin
-$CRYPTSETUP luksKillSlot $LOOPDEV 3 </dev/null || fail
+$CRYPTSETUP luksKillSlot $LOOPDEV 3 </dev/null 2>/dev/null || fail
 $CRYPTSETUP luksDump $LOOPDEV | grep -q "Key Slot 3: DISABLED" || fail
 # remove key0 / slot 0
 echo $PWD1 | $CRYPTSETUP luksRemoveKey $LOOPDEV || fail
@@ -678,8 +680,8 @@ $CRYPTSETUP luksOpen -S 5 -d $KEY1 $LOOPDEV $DEV_NAME 2>/dev/null && fail
 prepare "[28] Detached LUKS header" wipe
 echo $PWD1 | $CRYPTSETUP luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV --header $HEADER_IMG || fail
 echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT $LOOPDEV --header $HEADER_IMG --align-payload 1 >/dev/null 2>&1 && fail
-echo $PWD1 | $CRYPTSETUP luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV --header $HEADER_IMG --align-payload 8192 || fail
-echo $PWD1 | $CRYPTSETUP luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV --header $HEADER_IMG --align-payload 0 || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV --header $HEADER_IMG --align-payload 8192 || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_OPT $LOOPDEV --header $HEADER_IMG --align-payload 0 || fail
 echo $PWD1 | $CRYPTSETUP luksOpen $LOOPDEV --header $HEADER_IMG $DEV_NAME || fail
 $CRYPTSETUP -q resize  $DEV_NAME --size 100 --header $HEADER_IMG || fail
 $CRYPTSETUP -q status  $DEV_NAME --header $HEADER_IMG | grep "size:" | grep -q "100 sectors" || fail

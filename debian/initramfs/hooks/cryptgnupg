@@ -19,9 +19,27 @@ esac
 . /usr/share/initramfs-tools/hook-functions
 . /lib/cryptsetup/functions
 
+if [ ! -x "$DESTDIR/lib/cryptsetup/scripts/decrypt_gnupg" ] || [ ! -f "$TABFILE" ]; then
+    exit 0
+fi
+
 # Hooks for loading gnupg software and symmetrically encrypted key into
 # the initramfs
-crypttab_copy_keys_to_initramfs 'decrypt_gnupg' || exit 1
+copy_keys() {
+    crypttab_parse_options
+    if [ "${CRYPTTAB_OPTION_keyscript-}" = "/lib/cryptsetup/scripts/decrypt_gnupg" ]; then
+        if [ -f "$CRYPTTAB_KEY" ]; then
+            copy_file keyfile "$CRYPTTAB_KEY"
+        else
+            cryptsetup_message "ERROR: Target $CRYPTTAB_NAME has a non-existing key file $CRYPTTAB_KEY"
+            RV=1
+        fi
+    fi
+}
+
+RV=0
+crypttab_foreach_entry copy_keys
 
 # Install gnupg software
 copy_exec /usr/bin/gpg
+exit $RV

@@ -46,12 +46,15 @@ mount_fs
 
 rv=0
 for name in "$@"; do
-    if ! crypttab_find_target "$name"; then
+    if ! crypttab_find_entry --quiet "$name"; then
         device_msg "$name" "failed, not found in crypttab"
         rv=1
     else
-        CRYPTTAB_OPTIONS="$CRYPTTAB_OPTIONS${CRYPTTAB_EXTRA_OPTIONS:+,$CRYPTTAB_EXTRA_OPTIONS}"
-        setup_mapping "$CRYPTTAB_NAME" "$CRYPTTAB_SOURCE" "$CRYPTTAB_KEY" "$CRYPTTAB_OPTIONS" || rv=$?
+        if [ -n "$CRYPTTAB_EXTRA_OPTIONS" ]; then
+            CRYPTTAB_OPTIONS="$CRYPTTAB_OPTIONS,$CRYPTTAB_EXTRA_OPTIONS"
+            _CRYPTTAB_OPTIONS="$_CRYPTTAB_OPTIONS,$CRYPTTAB_EXTRA_OPTIONS"
+        fi
+        setup_mapping || rv=$?
     fi
 done
 umount_fs

@@ -600,7 +600,7 @@ static int create_new_header(struct reenc_ctx *rc, struct crypt_device *cd_old,
 		r = create_new_keyslot(rc, i, cd_old, cd_new);
 		if (r < 0)
 			goto out;
-		log_verbose(_("Activated keyslot %i."), r);
+		tools_keyslot_msg(r, CREATED);
 		r = 0;
 	}
 out:
@@ -721,7 +721,7 @@ static int backup_luks_headers(struct reenc_ctx *rc)
 		if ((r = chmod(rc->header_file_tmp, st.st_mode | S_IWUSR)))
 			goto out;
 	}
-	log_verbose(_("%s header backup of device %s created."), rc->device, isLUKS2(rc->type) ? "LUKS2" : "LUKS1");
+	log_verbose(_("%s header backup of device %s created."), isLUKS2(rc->type) ? "LUKS2" : "LUKS1", rc->device);
 
 	/* For decrypt, new header will be fake one, so we are done here. */
 	if (rc->reencrypt_mode == DECRYPT)
@@ -916,9 +916,9 @@ static int restore_luks_header(struct reenc_ctx *rc)
 	crypt_free(cd);
 out:
 	if (r)
-		log_err(_("Cannot restore %s header on device %s."), hdr_device(rc), isLUKS2(rc->type) ? "LUKS2" : "LUKS1");
+		log_err(_("Cannot restore %s header on device %s."), isLUKS2(rc->type) ? "LUKS2" : "LUKS1", hdr_device(rc));
 	else {
-		log_verbose(_("%s header on device %s restored."), hdr_device(rc), isLUKS2(rc->type) ? "LUKS2" : "LUKS1");
+		log_verbose(_("%s header on device %s restored."), isLUKS2(rc->type) ? "LUKS2" : "LUKS1", hdr_device(rc));
 		rc->stained = 0;
 	}
 	return r;
@@ -1271,6 +1271,7 @@ static int init_passphrase1(struct reenc_ctx *rc, struct crypt_device *cd,
 			return r;
 
 		if (r >= 0) {
+			tools_keyslot_msg(r, UNLOCKED);
 			rc->p[r].password = password;
 			rc->p[r].passwordLen = passwordLen;
 			if (ki != CRYPT_SLOT_UNBOUND)
@@ -1551,7 +1552,7 @@ static int run_reencrypt(const char *device)
 
 		log_dbg("Storing backup of LUKS headers.");
 		if (rc.reencrypt_mode == ENCRYPT) {
-			/* Create fake header for exising device */
+			/* Create fake header for existing device */
 			if ((r = backup_fake_header(&rc)))
 				goto out;
 		} else {

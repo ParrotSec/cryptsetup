@@ -27,7 +27,8 @@
 # /etc/keys/{root,swap}.key, you can set KEYFILE_PATTERN="/etc/keys/*.key"
 # to add them to the initrd.)
 #
-# Setting KEYFILE_PATTERN to a non-empty value implies "CRYPTSETUP=y".
+# If KEYFILE_PATTERN if null or unset (default) then no key file is
+# copied to the initramfs image.
 #
 # WARNING: If the initramfs image is to include private key material,
 # you'll want to create it with a restrictive umask in order to keep

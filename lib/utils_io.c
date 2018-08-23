@@ -30,7 +30,7 @@
 
 #include "utils_io.h"
 
-ssize_t read_buffer(int fd, void *buf, size_t length)
+static ssize_t _read_buffer(int fd, void *buf, size_t length, volatile int *quit)
 {
 	size_t read_size = 0;
 	ssize_t r;
@@ -42,18 +42,28 @@ ssize_t read_buffer(int fd, void *buf, size_t length)
 		r = read(fd, buf, length - read_size);
 		if (r == -1 && errno != EINTR)
 			return r;
-		if (r == 0)
-			return (ssize_t)read_size;
 		if (r > 0) {
 			read_size += (size_t)r;
 			buf = (uint8_t*)buf + r;
 		}
+		if (r == 0 || (quit && *quit))
+			return (ssize_t)read_size;
 	} while (read_size != length);
 
 	return (ssize_t)length;
 }
 
-ssize_t write_buffer(int fd, const void *buf, size_t length)
+ssize_t read_buffer(int fd, void *buf, size_t length)
+{
+	return _read_buffer(fd, buf, length, NULL);
+}
+
+ssize_t read_buffer_intr(int fd, void *buf, size_t length, volatile int *quit)
+{
+	return _read_buffer(fd, buf, length, quit);
+}
+
+static ssize_t _write_buffer(int fd, const void *buf, size_t length, volatile int *quit)
 {
 	size_t write_size = 0;
 	ssize_t w;
@@ -65,15 +75,25 @@ ssize_t write_buffer(int fd, const void *buf, size_t length)
 		w = write(fd, buf, length - write_size);
 		if (w < 0 && errno != EINTR)
 			return w;
-		if (w == 0)
-			return (ssize_t)write_size;
 		if (w > 0) {
 			write_size += (size_t) w;
 			buf = (const uint8_t*)buf + w;
 		}
+		if (w == 0 || (quit && *quit))
+			return (ssize_t)write_size;
 	} while (write_size != length);
 
 	return (ssize_t)write_size;
+}
+
+ssize_t write_buffer(int fd, const void *buf, size_t length)
+{
+	return _write_buffer(fd, buf, length, NULL);
+}
+
+ssize_t write_buffer_intr(int fd, const void *buf, size_t length, volatile int *quit)
+{
+	return _write_buffer(fd, buf, length, quit);
 }
 
 ssize_t write_blockwise(int fd, size_t bsize, size_t alignment,
@@ -105,15 +125,13 @@ ssize_t write_blockwise(int fd, size_t bsize, size_t alignment,
 	if (hangover) {
 		if (posix_memalign(&hangover_buf, alignment, bsize))
 			goto out;
+		memset(hangover_buf, 0, bsize);
 
 		r = read_buffer(fd, hangover_buf, bsize);
-		if (r < 0 || r < (ssize_t)hangover)
+		if (r < 0)
 			goto out;
 
-		if (r < (ssize_t)bsize)
-			bsize = r;
-
-		if (lseek(fd, -(off_t)bsize, SEEK_CUR) < 0)
+		if (lseek(fd, -(off_t)r, SEEK_CUR) < 0)
 			goto out;
 
 		memcpy(hangover_buf, (char*)buf + solid, hangover);
@@ -199,7 +217,7 @@ ssize_t write_lseek_blockwise(int fd, size_t bsize, size_t alignment,
 	if (lseek(fd, offset - frontHang, SEEK_SET) < 0)
 		return -1;
 
-	if (frontHang) {
+	if (frontHang && length) {
 		if (posix_memalign(&frontPadBuf, alignment, bsize))
 			return -1;
 
@@ -216,8 +234,8 @@ ssize_t write_lseek_blockwise(int fd, size_t bsize, size_t alignment,
 		if (lseek(fd, offset - frontHang, SEEK_SET) < 0)
 			goto out;
 
-		r = write_buffer(fd, frontPadBuf, frontHang + innerCount);
-		if (r < 0 || r != (ssize_t)(frontHang + innerCount))
+		r = write_buffer(fd, frontPadBuf, bsize);
+		if (r < 0 || r != (ssize_t)bsize)
 			goto out;
 
 		buf = (char*)buf + innerCount;
@@ -253,7 +271,7 @@ ssize_t read_lseek_blockwise(int fd, size_t bsize, size_t alignment,
 	if (lseek(fd, offset - frontHang, SEEK_SET) < 0)
 		return -1;
 
-	if (frontHang) {
+	if (frontHang && length) {
 		if (posix_memalign(&frontPadBuf, alignment, bsize))
 			return -1;
 

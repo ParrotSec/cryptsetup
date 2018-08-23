@@ -15,7 +15,7 @@ fi
 dev="$1"
 fs="$2"
 
-blkid="$(/sbin/blkid -o value -s TYPE -p $dev)"
+blkid="$(/sbin/blkid -o value -s TYPE -p -- "$dev")"
 
 # blkid output is empty if $dev has an unknown filesystem
 if [ -n "$blkid" ] && [ -z "$fs" ]; then

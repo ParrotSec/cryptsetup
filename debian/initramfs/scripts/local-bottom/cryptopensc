@@ -16,15 +16,17 @@ case $1 in
         ;;
 esac
 
-. /scripts/functions
-
 # Hook for stopping smartcard reading software
 
-if [ ! -e /sbin/pcscd ]; then
+if [ ! -x /usr/sbin/pcscd ]; then
     exit 0
 fi
 
-# Start pcscd daemon nomrally.  If it was started in foregound, chances are
-# it'll harmlessly complain about missing /var/run/pcscd* files due to the root
-# filessytem being remounted.
-start-stop-daemon --stop --quiet --pidfile /var/run/pcscd.pid --name pcscd
+. /scripts/functions
+
+if PID="$(cat /run/pcscd.pid)" 2>/dev/null &&
+        [ "$(readlink -f "/proc/$PID/exe")" = "/usr/sbin/pcscd" ]; then
+    log_begin_msg "Stopping pcscd"
+    kill -TERM "$PID"
+    log_end_msg
+fi
