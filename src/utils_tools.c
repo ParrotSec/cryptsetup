@@ -272,6 +272,30 @@ int translate_errno(int r)
 	return r;
 }
 
+void tools_keyslot_msg(int keyslot, crypt_object_op op)
+{
+	if (keyslot < 0)
+		return;
+
+	if (op == CREATED)
+		log_verbose(_("Key slot %i created."), keyslot);
+	else if (op == UNLOCKED)
+		log_verbose(_("Key slot %i unlocked."), keyslot);
+	else if (op == REMOVED)
+		log_verbose(_("Key slot %i removed."), keyslot);
+}
+
+void tools_token_msg(int token, crypt_object_op op)
+{
+	if (token < 0)
+		return;
+
+	if (op == CREATED)
+		log_verbose(_("Token %i created."), token);
+	else if (op == REMOVED)
+		log_verbose(_("Token %i removed."), token);
+}
+
 /*
  * Device size string parsing, suffixes:
  * s|S - 512 bytes sectors
@@ -427,5 +451,250 @@ int tools_wipe_progress(uint64_t size, uint64_t offset, void *usrptr)
 		log_err("\nWipe interrupted.");
 	}
 
+	return r;
+}
+
+static void report_partition(const char *value, const char *device)
+{
+	if (opt_batch_mode)
+		log_dbg("Device %s already contains a '%s' partition signature.", device, value);
+	else
+		log_std(_("WARNING: Device %s already contains a '%s' partition signature.\n"), device, value);
+}
+
+static void report_superblock(const char *value, const char *device)
+{
+	if (opt_batch_mode)
+		log_dbg("Device %s already contains a '%s' superblock signature.", device, value);
+	else
+		log_std(_("WARNING: Device %s already contains a '%s' superblock signature.\n"), device, value);
+}
+
+int tools_detect_signatures(const char *device, int ignore_luks, size_t *count)
+{
+	int r;
+	size_t tmp_count;
+	struct blkid_handle *h;
+	blk_probe_status pr;
+
+	if (!count)
+		count = &tmp_count;
+
+	*count = 0;
+
+	if (!blk_supported()) {
+		log_dbg("Blkid support disabled.");
+		return 0;
+	}
+
+	if ((r = blk_init_by_path(&h, device))) {
+		log_err(_("Failed to initialize device signature probes."));
+		return -EINVAL;
+	}
+
+	blk_set_chains_for_full_print(h);
+
+	if (ignore_luks && blk_superblocks_filter_luks(h)) {
+		r = -EINVAL;
+		goto out;
+	}
+
+	while ((pr = blk_probe(h)) < PRB_EMPTY) {
+		if (blk_is_partition(h))
+			report_partition(blk_get_partition_type(h), device);
+		else if (blk_is_superblock(h))
+			report_superblock(blk_get_superblock_type(h), device);
+		else {
+			log_dbg("Internal tools_detect_signatures() error.");
+			r = -EINVAL;
+			goto out;
+		}
+		(*count)++;
+	}
+
+	if (pr == PRB_FAIL)
+		r = -EINVAL;
+out:
+	blk_free(h);
+	return r;
+}
+
+int tools_wipe_all_signatures(const char *path)
+{
+	int fd, flags, r;
+	blk_probe_status pr;
+	struct stat st;
+	struct blkid_handle *h = NULL;
+
+	if (!blk_supported()) {
+		log_dbg("Blkid support disabled.");
+		return 0;
+	}
+
+	if (stat(path, &st)) {
+		log_err(_("Failed to stat device %s."), path);
+		return -EINVAL;
+	}
+
+	flags = O_RDWR;
+	if (S_ISBLK(st.st_mode))
+		flags |= O_EXCL;
+
+	/* better than opening regular file with O_EXCL (undefined) */
+	/* coverity[toctou] */
+	fd = open(path, flags);
+	if (fd < 0) {
+		if (errno == EBUSY)
+			log_err(_("Device %s is in use. Can not proceed with format operation."), path);
+		else
+			log_err(_("Failed to open file %s in read/write mode."), path);
+		return -EINVAL;
+	}
+
+	if ((r = blk_init_by_fd(&h, fd))) {
+		log_err(_("Failed to initialize device signature probes."));
+		r = -EINVAL;
+		goto out;
+	}
+
+	blk_set_chains_for_wipes(h);
+
+	while ((pr = blk_probe(h)) < PRB_EMPTY) {
+		if (blk_is_partition(h))
+			log_verbose("Existing '%s' partition signature on device %s will be wiped.",
+				    blk_get_partition_type(h), path);
+		if (blk_is_superblock(h))
+			log_verbose("Existing '%s' superblock signature on device %s will be wiped.",
+				    blk_get_superblock_type(h), path);
+		if (blk_do_wipe(h)) {
+			log_err(_("Failed to wipe device signature."));
+			r = -EINVAL;
+			goto out;
+		}
+	}
+
+	if (pr != PRB_EMPTY) {
+		log_err(_("Failed to probe device %s for a signature."), path);
+		r = -EINVAL;
+	}
+out:
+	close(fd);
+	blk_free(h);
+	return r;
+}
+
+/*
+ * FIXME: 4MiBs is max LUKS2 mda length (including binary header).
+ * In future, read max allowed JSON size from config section.
+ */
+#define LUKS2_MAX_MDA_SIZE 0x400000
+int tools_read_json_file(struct crypt_device *cd, const char *file, char **json, size_t *json_size)
+{
+	ssize_t ret;
+	int fd, block, r;
+	void *buf = NULL;
+
+	block = tools_signals_blocked();
+	if (block)
+		set_int_block(0);
+
+	if (tools_is_stdin(file)) {
+		fd = STDIN_FILENO;
+		log_dbg("STDIN descriptor JSON read requested.");
+	} else {
+		log_dbg("File descriptor JSON read requested.");
+		fd = open(file, O_RDONLY);
+		if (fd < 0) {
+			log_err(_("Failed to open file %s in read-only mode."), file);
+			r = -EINVAL;
+			goto out;
+		}
+	}
+
+	buf = malloc(LUKS2_MAX_MDA_SIZE);
+	if (!buf) {
+		r = -ENOMEM;
+		goto out;
+	}
+
+	if (isatty(fd) && !opt_batch_mode)
+		log_std(_("Provide valid LUKS2 token JSON:\n"));
+
+	/* we expect JSON (string) */
+	r = 0;
+	ret = read_buffer_intr(fd, buf, LUKS2_MAX_MDA_SIZE - 1, &quit);
+	if (ret < 0) {
+		r = -EIO;
+		log_err(_("Failed to read JSON file."));
+		goto out;
+	}
+	check_signal(&r);
+	if (r) {
+		log_err(_("\nRead interrupted."));
+		goto out;
+	}
+
+	*json_size = (size_t)ret;
+	*json = buf;
+	*(*json + ret) = '\0';
+out:
+	if (block && !quit)
+		set_int_block(1);
+	if (fd >= 0 && fd != STDIN_FILENO)
+		close(fd);
+	if (r && buf) {
+		memset(buf, 0, LUKS2_MAX_MDA_SIZE);
+		free(buf);
+	}
+	return r;
+}
+
+int tools_write_json_file(struct crypt_device *cd, const char *file, const char *json)
+{
+	int block, fd, r;
+	size_t json_len;
+	ssize_t ret;
+
+	if (!json || !(json_len = strlen(json)) || json_len >= LUKS2_MAX_MDA_SIZE)
+		return -EINVAL;
+
+	block = tools_signals_blocked();
+	if (block)
+		set_int_block(0);
+
+	if (tools_is_stdin(file)) {
+		fd = STDOUT_FILENO;
+		log_dbg("STDOUT descriptor JSON write requested.");
+	} else {
+		log_dbg("File descriptor JSON write requested.");
+		fd = open(file, O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
+	}
+
+	if (fd < 0) {
+		log_err(_("Failed to open file %s in write mode."), file ?: "");
+		r = -EINVAL;
+		goto out;
+	}
+
+	r = 0;
+	ret = write_buffer_intr(fd, json, json_len, &quit);
+	check_signal(&r);
+	if (r) {
+		log_err(_("\nWrite interrupted."));
+		goto out;
+	}
+	if (ret < 0 || (size_t)ret != json_len) {
+		log_err(_("Failed to write JSON file."));
+		r = -EIO;
+		goto out;
+	}
+
+	if (isatty(fd))
+		(void) write_buffer_intr(fd, "\n", 1, &quit);
+out:
+	if (block && !quit)
+		set_int_block(1);
+	if (fd >=0 && fd != STDOUT_FILENO)
+		close(fd);
 	return r;
 }

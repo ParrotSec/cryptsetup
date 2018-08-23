@@ -644,16 +644,16 @@ struct crypt_pbkdf_type *crypt_get_pbkdf(struct crypt_device *cd)
 /*
  * crypt_load() helpers
  */
-static int _crypt_load_luks2(struct crypt_device *cd, int reload)
+static int _crypt_load_luks2(struct crypt_device *cd, int reload, int repair)
 {
 	int r;
 	char tmp_cipher[MAX_CIPHER_LEN], tmp_cipher_mode[MAX_CIPHER_LEN],
 	     *cipher = NULL, *cipher_mode = NULL, *type = NULL;
 	struct luks2_hdr hdr2 = {};
 
-	log_dbg("%soading LUKS2 header.", reload ? "Rel" : "L");
+	log_dbg("%soading LUKS2 header (repair %sabled).", reload ? "Rel" : "L", repair ? "en" : "dis");
 
-	r = LUKS2_hdr_read(cd, &hdr2);
+	r = LUKS2_hdr_read(cd, &hdr2, repair);
 	if (r)
 		return r;
 
@@ -713,7 +713,7 @@ static void _luks2_reload(struct crypt_device *cd)
 	if (!cd || !isLUKS2(cd->type))
 		return;
 
-	(void) _crypt_load_luks2(cd, 1);
+	(void) _crypt_load_luks2(cd, 1, 0);
 }
 
 static int _crypt_load_luks(struct crypt_device *cd, const char *requested_type,
@@ -768,7 +768,15 @@ static int _crypt_load_luks(struct crypt_device *cd, const char *requested_type,
 			return -EINVAL;
 		}
 
-		r =  _crypt_load_luks2(cd, cd->type != NULL);
+		/*
+		 * Current LUKS2 repair just overrides blkid probes
+		 * and perform auto-recovery if possible. This is safe
+		 * unless future LUKS2 repair code do something more
+		 * sophisticated. In such case we would need to check
+		 * for LUKS2 requirements and decide if it's safe to
+		 * perform repair.
+		 */
+		r =  _crypt_load_luks2(cd, cd->type != NULL, repair);
 	} else
 		r = -EINVAL;
 out:
@@ -1028,6 +1036,7 @@ static void crypt_free_type(struct crypt_device *cd)
 		crypt_free_volume_key(cd->u.integrity.journal_mac_key);
 	} else if (!cd->type) {
 		free(cd->u.none.active_name);
+		cd->u.none.active_name = NULL;
 	}
 
 	crypt_set_null_type(cd);
@@ -2023,8 +2032,7 @@ int crypt_repair(struct crypt_device *cd,
 	if (!crypt_metadata_device(cd))
 		return -EINVAL;
 
-	/* FIXME LUKS2 (if so it also must respect LUKS2 requirements) */
-	if (requested_type && !isLUKS1(requested_type))
+	if (requested_type && !isLUKS(requested_type))
 		return -EINVAL;
 
 	/* Load with repair */
@@ -2694,15 +2702,9 @@ int crypt_keyslot_change_by_passphrase(struct crypt_device *cd,
 	} else
 		r = -EINVAL;
 
-	if (keyslot_old == keyslot_new) {
-		if (r >= 0)
-			log_verbose(cd, _("Key slot %d changed."), keyslot_new);
-	} else {
-		if (r >= 0) {
-			log_verbose(cd, _("Replaced with key slot %d."), keyslot_new);
-			r = crypt_keyslot_destroy(cd, keyslot_old);
-		}
-	}
+	if (r >= 0 && keyslot_old != keyslot_new)
+		r = crypt_keyslot_destroy(cd, keyslot_old);
+
 	if (r < 0)
 		log_err(cd, _("Failed to swap new key slot."));
 out:
@@ -4538,4 +4540,5 @@ int crypt_activate_by_keyring(struct crypt_device *cd,
 static void __attribute__((destructor)) libcryptsetup_exit(void)
 {
 	crypt_backend_destroy();
+	crypt_random_exit();
 }

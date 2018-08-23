@@ -32,6 +32,7 @@
 
 #include "nls.h"
 #include "bitops.h"
+#include "utils_blkid.h"
 #include "utils_crypt.h"
 #include "utils_loop.h"
 #include "utils_dm.h"
@@ -53,6 +54,10 @@
 #define LOG_MAX_LEN		4096
 
 #define at_least(a, b) ({ __typeof__(a) __at_least = (a); (__at_least >= (b))?__at_least:(b); })
+
+#ifndef ARRAY_SIZE
+# define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#endif
 
 struct crypt_device;
 
@@ -139,7 +144,7 @@ uint64_t crypt_getphysmemory_kb(void);
 
 int init_crypto(struct crypt_device *ctx);
 
-void logger(struct crypt_device *cd, int class, const char *file, int line, const char *format, ...) __attribute__ ((format (printf, 5, 6)));
+void logger(struct crypt_device *cd, int level, const char *file, int line, const char *format, ...) __attribute__ ((format (printf, 5, 6)));
 #define log_dbg(x...) logger(NULL, CRYPT_LOG_DEBUG, __FILE__, __LINE__, x)
 #define log_std(c, x...) logger(c, CRYPT_LOG_NORMAL, __FILE__, __LINE__, x)
 #define log_verbose(c, x...) logger(c, CRYPT_LOG_VERBOSE, __FILE__, __LINE__, x)

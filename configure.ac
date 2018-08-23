@@ -1,5 +1,5 @@
 AC_PREREQ([2.67])
-AC_INIT([cryptsetup],[2.0.3])
+AC_INIT([cryptsetup],[2.0.4])
 
 dnl library version from <major>.<minor>.<release>[-<suffix>]
 LIBCRYPTSETUP_VERSION=$(echo $PACKAGE_VERSION | cut -f1 -d-)
@@ -408,12 +408,59 @@ if test x$enable_libargon2 = xyes ; then
 	enable_internal_argon2=no
 else
 	AC_MSG_WARN([Argon2 bundled (slow) reference implementation will be used, please consider to use system library with --enable-libargon2.])
+
+	AC_ARG_ENABLE(internal-sse-argon2, AS_HELP_STRING([--enable-internal-sse-argon2],
+		[enable internal SSE implementation of Argon2 PBKDF]),[], [enable_internal_sse_argon2=no])
+
+	if test x$enable_internal_sse_argon2 = xyes ; then
+		AC_MSG_CHECKING(if Argon2 SSE optimization can be used)
+		AC_LINK_IFELSE([AC_LANG_PROGRAM([[
+			#include <emmintrin.h>
+			__m128i testfunc(__m128i *a, __m128i *b) {
+			  return _mm_xor_si128(_mm_loadu_si128(a), _mm_loadu_si128(b));
+			}
+		]])],,[enable_internal_sse_argon2=no])
+		AC_MSG_RESULT($enable_internal_sse_argon2)
+	fi
 fi
 
 if test x$enable_internal_argon2 = xyes ; then
 	AC_DEFINE(USE_INTERNAL_ARGON2, 1, [Use internal Argon2])
 fi
 AM_CONDITIONAL(CRYPTO_INTERNAL_ARGON2, test x$enable_internal_argon2 = xyes)
+AM_CONDITIONAL(CRYPTO_INTERNAL_SSE_ARGON2, test x$enable_internal_sse_argon2 = xyes)
+
+dnl Link with blkid to check for other device types
+AC_ARG_ENABLE(blkid, AS_HELP_STRING([--disable-blkid],
+	[disable use of blkid for device signature detection and wiping.]), [], [enable_blkid=yes])
+
+if test x$enable_blkid = xyes ; then
+	PKG_CHECK_MODULES([BLKID], [blkid],[AC_DEFINE([HAVE_BLKID], 1, [Define to 1 to use blkid for detection of disk signatures.])],[LIBBLKID_LIBS="-lblkid"])
+
+	AC_CHECK_HEADERS(blkid/blkid.h,,[AC_MSG_ERROR([You need blkid development library installed.])])
+	AC_CHECK_DECL([blkid_do_wipe],
+		      [ AC_DEFINE([HAVE_BLKID_WIPE], 1, [Define to 1 to use blkid_do_wipe.])
+			enable_blkid_wipe=yes
+		      ],,
+		      [#include <blkid/blkid.h>])
+	AC_CHECK_DECL([blkid_probe_step_back],
+		      [ AC_DEFINE([HAVE_BLKID_STEP_BACK], 1, [Define to 1 to use blkid_probe_step_back.])
+			enable_blkid_step_back=yes
+		      ],,
+		      [#include <blkid/blkid.h>])
+	AC_CHECK_DECLS([ blkid_reset_probe,
+			 blkid_probe_set_device,
+			 blkid_probe_filter_superblocks_type,
+			 blkid_do_safeprobe,
+			 blkid_do_probe,
+			 blkid_probe_lookup_value
+		       ],,
+		       [AC_MSG_ERROR([Can not compile with blkid support, disable it by --disable-blkid.])],
+		       [#include <blkid/blkid.h>])
+fi
+AM_CONDITIONAL(HAVE_BLKID, test x$enable_blkid = xyes)
+AM_CONDITIONAL(HAVE_BLKID_WIPE, test x$enable_blkid_wipe = xyes)
+AM_CONDITIONAL(HAVE_BLKID_STEP_BACK, test x$enable_blkid_step_back = xyes)
 
 dnl Magic for cryptsetup.static build.
 if test x$enable_static_cryptsetup = xyes; then
@@ -465,14 +512,19 @@ AC_SUBST([CRYPTO_STATIC_LIBS])
 
 AC_SUBST([JSON_C_LIBS])
 AC_SUBST([LIBARGON2_LIBS])
+AC_SUBST([BLKID_LIBS])
 
 AC_SUBST([LIBCRYPTSETUP_VERSION])
 AC_SUBST([LIBCRYPTSETUP_VERSION_INFO])
 
 dnl ==========================================================================
-AC_ARG_ENABLE([dev-random], AS_HELP_STRING([--enable-dev-random],
-[use blocking /dev/random by default for key generator (otherwise use /dev/urandom)]),
-[default_rng=/dev/random], [default_rng=/dev/urandom])
+AC_ARG_ENABLE([dev-random],
+	AS_HELP_STRING([--enable-dev-random], [use /dev/random by default for key generation (otherwise use /dev/urandom)]))
+if test "x$enable_dev_random" = "xyes"; then
+	default_rng=/dev/random
+else
+	default_rng=/dev/urandom
+fi
 AC_DEFINE_UNQUOTED(DEFAULT_RNG, ["$default_rng"], [default RNG type for key generator])
 
 dnl ==========================================================================

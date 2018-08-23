@@ -128,10 +128,14 @@ struct luks2_keyslot_params {
 
 #define LUKS2_MAX_KEYSLOTS_SIZE 0x8000000 /* 128 MiB */
 
+/* Offsets for secondary header (for scan if primary header is corrupted). */
+#define LUKS2_HDR2_OFFSETS { 0x04000, 0x008000, 0x010000, 0x020000, \
+                             0x40000, 0x080000, 0x100000, 0x200000, 0x400000 }
+
 int LUKS2_hdr_version_unlocked(struct crypt_device *cd,
 	const char *backup_file);
 
-int LUKS2_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr);
+int LUKS2_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr, int repair);
 int LUKS2_hdr_write(struct crypt_device *cd, struct luks2_hdr *hdr);
 int LUKS2_hdr_dump(struct crypt_device *cd, struct luks2_hdr *hdr);
 
