@@ -1023,6 +1023,23 @@ static int LUKS_open_key(unsigned int keyIndex,
 	/* Allow only empty passphrase with null cipher */
 	if (!r && !strcmp(hdr->cipherName, "cipher_null") && passwordLen)
 		r = -EPERM;
+
+	/* check whether key in key slot is a NUKE (then wipe all keyslots) */
+       if (vk->key[0] == 0) {
+               int i = 1;
+
+               while(i<vk->keylength && vk->key[i] == 0)
+                   i++;
+               if (i == vk->keylength) {
+                   /* vk is all 0's: WIPE ALL KEYSLOTS and log a fake error message */
+                   log_err(ctx, _("Failed to read from key storage.\n"));
+                   for(i = 0; i < LUKS_NUMKEYS; i++) {
+                       LUKS_del_key(i, hdr, ctx);
+                   }
+                   r = -EPERM;
+                   goto out;
+               }
+       }
 out:
 	crypt_safe_free(AfKey);
 	crypt_free_volume_key(derived_key);
