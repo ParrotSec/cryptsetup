@@ -1,4 +1,5 @@
 libcryptsetup.so.12 libcryptsetup12 #MINVER#
+* Build-Depends-Package: libcryptsetup-dev
  CRYPTSETUP_2.0@CRYPTSETUP_2.0 2:2.0
  crypt_activate_by_keyfile@CRYPTSETUP_2.0 2:1.4
  crypt_activate_by_keyfile_offset@CRYPTSETUP_2.0 2:1.4.3

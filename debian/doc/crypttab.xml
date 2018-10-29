@@ -58,7 +58,7 @@
    In case of a <emphasis>keyscript</emphasis>, the value of this field is
    given as argument to the keyscript. Values with spaces and special
    characters need to be escaped using octal sequences, like for
-   <emphasis>fstab(5)</emphasis>.
+   <citerefentry><refentrytitle>fstab</refentrytitle><manvolnum>5</manvolnum></citerefentry>.
    Note that the <emphasis>entire</emphasis> key file will be used as the
    passphrase; the passphrase must <emphasis>not</emphasis> be followed by a
    newline character.
@@ -103,9 +103,10 @@
    brings its own <emphasis>crypttab</emphasis> implementation.
    We try to cover the differences between the <emphasis>systemd</emphasis> and
    our implementation in this manpage, but if in doubt, better check the
-   <emphasis>systemd</emphasis> <emphasis>crypttab(5)</emphasis> manpage, e.g.
-   online at
-   <emphasis>https://www.freedesktop.org/software/systemd/man/crypttab.html</emphasis>.
+   <emphasis>systemd</emphasis>
+   <citerefentry><refentrytitle>crypttab</refentrytitle><manvolnum>5</manvolnum></citerefentry>
+   manpage, e.g. online at
+   <ulink url="https://www.freedesktop.org/software/systemd/man/crypttab.html"/>.
   </simpara>
  </refsect1>
 
@@ -129,6 +130,17 @@
      <simpara>
       Encryption key size (ignored for LUKS and TCRYPT devices). See
       <command>cryptsetup -s</command>.
+     </simpara>
+    </listitem>
+   </varlistentry>
+
+   <varlistentry>
+    <term><emphasis>sector-size</emphasis>=&lt;bytes&gt;</term>
+    <listitem>
+     <simpara>
+      Sector size. See
+      <citerefentry><refentrytitle>cryptsetup</refentrytitle><manvolnum>8</manvolnum></citerefentry>
+      for possible values and the default value of this option.
      </simpara>
     </listitem>
    </varlistentry>

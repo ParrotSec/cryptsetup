@@ -110,8 +110,9 @@ setup_mapping() {
     fi
     device_msg "starting"
 
-    local type="$(get_crypt_type)" out tmpdev
-    if [ "$type" != "luks" ]; then
+    local out tmpdev
+    get_crypt_type # set CRYPTTAB_TYPE to the type of crypt device
+    if [ "$CRYPTTAB_TYPE" != "luks" ]; then
         if ! out="$(/lib/cryptsetup/checks/un_blkid "$CRYPTTAB_SOURCE" 2>/dev/null)" &&
                 ! /lib/cryptsetup/checks/blkid "$CRYPTTAB_SOURCE" swap >/dev/null; then
             # fail if the device has a filesystem; unless it's swap,

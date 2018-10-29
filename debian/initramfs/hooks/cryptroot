@@ -126,6 +126,7 @@ get_dmcrypt_slaves() {
 #   Return 0 on success, 1 on error.
 crypttab_find_and_print_entry() {
     local target="$1"
+    local _CRYPTTAB_NAME _CRYPTTAB_SOURCE _CRYPTTAB_KEY _CRYPTTAB_OPTIONS
     if ! grep -Fxqz -e "$target" -- "$DESTDIR/cryptroot/targets"; then
         printf '%s\0' "$target" >>"$DESTDIR/cryptroot/targets"
         crypttab_find_entry "$target" || return 1
@@ -207,7 +208,9 @@ crypttab_print_entry() {
     fi
     if [ "${CRYPTTAB_OPTION_keyscript-}" = "/lib/cryptsetup/scripts/decrypt_derived" ]; then
         # (recursively) list first the device to derive the key from (so
-        # the boot scripts unlock it first)
+        # the boot scripts unlock it first); since _CRYPTTAB_* are local
+        # to crypttab_find_and_print_entry() the new value won't
+        # override the new ones
         crypttab_find_and_print_entry "$CRYPTTAB_KEY"
     fi
     printf '%s %s %s %s\n' \
@@ -385,14 +388,11 @@ if [ -f "/etc/cryptsetup-initramfs/conf-hook" ]; then
     . /etc/cryptsetup-initramfs/conf-hook
 fi
 
-# XXX post-Buster: remove this warning and the auto-detection logic below
-if [ -n "${CRYPTSETUP+x}" ]; then
-    cryptsetup_message "WARNING: Honoring CRYPTSETUP=[y|n] will deprecated in the future." \
-        "Please uninstall the 'cryptsetup-initramfs' package if you don't want the" \
-        "cryptsetup initramfs integration."
-fi
-
 if [ "${CRYPTSETUP-}" = "n" ] || [ "${CRYPTSETUP-}" = "N" ]; then
+    # XXX post-Buster: remove this warning and the auto-detection logic below
+    cryptsetup_message "WARNING: Honoring CRYPTSETUP=\"n\" will deprecated in the future." \
+        "Please uninstall the 'cryptsetup-initramfs' package instead" \
+        "if you don't want the cryptsetup initramfs integration."
     exit 0
 fi
 

@@ -6,7 +6,7 @@ decrypt_gpg () {
 		/usr/bin/gpg -q --batch --no-options  \
 		--no-random-seed-file --no-default-keyring \
 		--keyring /dev/null --secret-keyring /dev/null \
-		--trustdb-name /dev/null --passphrase-fd 0 --decrypt "$1"; then
+		--trustdb-name /dev/null --passphrase-fd 0 --decrypt -- "$1"; then
 		return 1
 	fi
 	return 0

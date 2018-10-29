@@ -1,3 +1,41 @@
+cryptsetup (2:2.0.4-3parrot1) testing; urgency=medium
+
+  * Import new Debian release.
+  * Preserve Kali NUKE patch.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Mon, 29 Oct 2018 17:35:07 +0100
+
+cryptsetup (2:2.0.4-3) unstable; urgency=medium
+
+  [ Guilhem Moulin ]
+  * debian/initramfs/hooks/cryptroot:
+    + Make _CRYPTTAB_* variables local to crypttab_find_and_print_entry().
+      (Closes: #907243.)
+    + Silence the warning that honoring CRYPTSETUP="[y|n]" in the config is
+      deprecated when the variable is set to "y".  (Keep the warning when it's
+      set to "n" though.)  Closes: #908220.
+  * debian/functions: Make get_crypt_type() set variable CRYPTTAB_TYPE to the
+    type of crypt device ("luks" / "plain" / "tcrypt").
+  * debian/initramfs/scripts/local-top/cryptroot: Don't complain that
+    (successful) unlocking of a LUKS device doesn't yield a known file system.
+    The check is preserved for plain dm-crypt devices and tcrypt devices.
+    (Closes: #906283.)
+  * debian/control: Bump Standards-Version to 4.2.1 (no changes necessary).
+  * debian/doc/crypttab.xml: Improve formatting.
+  * debian/cryptsetup-run.lintian-overrides: Remove unused override
+    init.d-script-possible-missing-stop (x2).
+  * debian/libcryptsetup12.symbols: Add "Build-Depends-Package:
+    libcryptsetup-dev" field.
+
+  [ Helmut Grohne ]
+  * Fix FTCBFS: Supply $(CC) from dpkg's buildtools.mk. (Closes: #911042)
+
+  [ Dimitri John Ledkov ]
+  * Implement support for `cryptsetup --sector-size` in crypttab(5).
+    LP: #1776626.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Mon, 22 Oct 2018 17:45:35 +0200
+
 cryptsetup (2:2.0.4-2parrot1) testing; urgency=medium
 
   * Import new Debian release.

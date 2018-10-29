@@ -123,6 +123,7 @@ setup_mapping() {
         fi
     fi
 
+    get_crypt_type # set CRYPTTAB_TYPE to the type of crypt device
     local count=0 maxtries="${CRYPTTAB_OPTION_tries:-3}" fstype vg rv
     while [ $maxtries -le 0 ] || [ $count -lt $maxtries ]; do
         if [ -z "${CRYPTTAB_OPTION_keyscript+x}" ] && [ "$CRYPTTAB_KEY" != "none" ]; then
@@ -144,13 +145,15 @@ setup_mapping() {
             return 1
         fi
 
-        if ! fstype="$(get_fstype "$dev")" || [ "$fstype" = unknown ]; then
-            # bad password for plain dm-crypt device?  or mkfs not run yet?
-            cryptsetup_message "ERROR: $CRYPTTAB_NAME: unknown fstype, bad password or options?"
-            wait_for_udev 10
-            /sbin/cryptsetup remove -- "$CRYPTTAB_NAME"
-            sleep 1
-            continue
+        if ! fstype="$(get_fstype "$dev")" || [ "$fstype" = "unknown" ]; then
+            if [ "$CRYPTTAB_TYPE" != "luks" ]; then
+                # bad password for plain dm-crypt device?  or mkfs not run yet?
+                cryptsetup_message "ERROR: $CRYPTTAB_NAME: unknown fstype, bad password or options?"
+                wait_for_udev 10
+                /sbin/cryptsetup remove -- "$CRYPTTAB_NAME"
+                sleep 1
+                continue
+            fi
         elif [ "$fstype" = lvm2 ]; then
             if [ ! -x /sbin/lvm ]; then
                 cryptsetup_message "WARNING: $CRYPTTAB_NAME: lvm is not available"

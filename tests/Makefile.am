@@ -14,7 +14,8 @@ TESTS = api-test \
 	keyring-compat-test \
 	luks2-validation-test \
 	luks2-integrity-test \
-	vectors-test
+	vectors-test \
+	blockwise-compat
 
 if VERITYSETUP
 TESTS += verity-compat-test
