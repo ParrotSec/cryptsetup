@@ -25,22 +25,26 @@ cryptsetup_message() {
     return 0
 }
 
-# crypttab_parse_options([--export], [--quiet])
+# crypttab_parse_options([--export], [--quiet], [--missing-path={ignore|warn|fail}])
 #   Parse $_CRYPTTAB_OPTIONS, a comma-separated option string from the
 #   crypttab(5) 4th column, and sets corresponding variables
 #   CRYPTTAB_OPTION_<option>=<value> (which are added to the environment
-#   if --export is set).
+#   if --export is set).  If --path-exists isn't set to "ignore" (the
+#   default), then options taking a file name, such as header=<path>,
+#   need to point to an existing path, otherwise a warning is printed;
+#   and an error is raised if the value is set to "fail".
 #   For error and warning messages, CRYPTTAB_NAME, (resp. CRYPTTAB_KEY)
 #   should be set to the (unmangled) mapped device name (resp. key
 #   file).
 #   Return 1 on parsing error, 0 otherwise (incl. if unknown options
 #   were encountered).
 crypttab_parse_options() {
-    local quiet="n" export="n"
+    local quiet="n" export="n" missing_path="ignore"
     while [ $# -gt 0 ]; do
         case "$1" in
             --quiet) quiet="y";;
             --export) export="y";;
+            --missing-path=*) missing_path="${1#--missing-path=}";;
             *) cryptsetup_message "WARNING: crypttab_parse_options(): unknown option $1"
         esac
         shift
@@ -143,8 +147,18 @@ crypttab_validate_option() {
 
     case "$o" in
         # value must be a non-empty string
-        cipher|hash|header)
+        cipher|hash)
             [ -n "${VALUE:+x}" ] || return 1
+        ;;
+        # value must be a non-empty string, and an existing path if --missing-path is set
+        header)
+            [ -n "${VALUE:+x}" ] || return 1
+            if [ "$missing_path" != "ignore" ]; then
+                if [ ! -e "$VALUE" ]; then
+                    cryptsetup_message "WARNING: $CRYPTTAB_NAME: $VALUE does not exist";
+                    [ "$missing_path" = "warn" ] || return 1
+                fi
+            fi
         ;;
         # numeric options >0
         size|keyfile-size|sector-size)
@@ -281,11 +295,6 @@ get_crypt_type() {
 #   $CRYPTTAB_NAME.
 unlock_mapping() {
     local keyfile="${1:--}"
-
-    if [ -n "${CRYPTTAB_OPTION_header+x}" ] && [ ! -f "$CRYPTTAB_OPTION_header" ]; then
-        cryptsetup_message "ERROR: $CRYPTTAB_NAME: LUKS header '$CRYPTTAB_OPTION_header' missing"
-        return 1
-    fi
 
     if [ "$CRYPTTAB_TYPE" = "luks" ] || [ "$CRYPTTAB_TYPE" = "tcrypt" ]; then
         # ignored for LUKS and TCRYPT devices

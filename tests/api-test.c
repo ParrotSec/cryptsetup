@@ -100,14 +100,18 @@ static int get_luks_offsets(int metadata_device,
 	uint64_t current_sector;
 	uint32_t sectors_per_stripes_set;
 
-	if (!keylength)
+	if (!keylength) {
+		if (r_header_size)
+		    *r_header_size = 0;
+		if (r_payload_offset)
+		    *r_payload_offset = 0;
 		return -1;
+	}
 
 	sectors_per_stripes_set = DIV_ROUND_UP(keylength*LUKS_STRIPES, SECTOR_SIZE);
-	printf("sectors_per_stripes %" PRIu32 "\n", sectors_per_stripes_set);
 	current_sector = DIV_ROUND_UP_MODULO(DIV_ROUND_UP(LUKS_PHDR_SIZE_B, SECTOR_SIZE),
 			LUKS_ALIGN_KEYSLOTS / SECTOR_SIZE);
-	for(i=0;i < (LUKS_NUMKEYS - 1);i++)
+	for (i=0; i < (LUKS_NUMKEYS - 1); i++)
 		current_sector = DIV_ROUND_UP_MODULO(current_sector + sectors_per_stripes_set,
 				LUKS_ALIGN_KEYSLOTS / SECTOR_SIZE);
 	if (r_header_size)
@@ -255,7 +259,7 @@ static int _setup(void)
 	_system("dmsetup create " DEVICE_EMPTY_name " --table \"0 10000 zero\"", 1);
 	_system("dmsetup create " DEVICE_ERROR_name " --table \"0 10000 error\"", 1);
 
-	_system(" [ ! -e " IMAGE1 " ] && bzip2 -dk " IMAGE1 ".bz2", 1);
+	_system(" [ ! -e " IMAGE1 " ] && xz -dk " IMAGE1 ".xz", 1);
 	fd = loop_attach(&DEVICE_1, IMAGE1, 0, 0, &ro);
 	close(fd);
 
@@ -264,22 +268,22 @@ static int _setup(void)
 	close(fd);
 
 	/* Keymaterial offset is less than 8 sectors */
-	_system(" [ ! -e " EVL_HEADER_1 " ] && bzip2 -dk " EVL_HEADER_1 ".bz2", 1);
+	_system(" [ ! -e " EVL_HEADER_1 " ] && xz -dk " EVL_HEADER_1 ".xz", 1);
 	/* keymaterial offset aims into payload area */
-	_system(" [ ! -e " EVL_HEADER_2 " ] && bzip2 -dk " EVL_HEADER_2 ".bz2", 1);
+	_system(" [ ! -e " EVL_HEADER_2 " ] && xz -dk " EVL_HEADER_2 ".xz", 1);
 	/* keymaterial offset is valid, number of stripes causes payload area to be overwritten */
-	_system(" [ ! -e " EVL_HEADER_3 " ] && bzip2 -dk " EVL_HEADER_3 ".bz2", 1);
+	_system(" [ ! -e " EVL_HEADER_3 " ] && xz -dk " EVL_HEADER_3 ".xz", 1);
 	/* luks device header for data and header on same device. payloadOffset is greater than
 	 * device size (crypt_load() test) */
-	_system(" [ ! -e " EVL_HEADER_4 " ] && bzip2 -dk " EVL_HEADER_4 ".bz2", 1);
+	_system(" [ ! -e " EVL_HEADER_4 " ] && xz -dk " EVL_HEADER_4 ".xz", 1);
 	 /* two keyslots with same offset (overlapping keyslots) */
-	_system(" [ ! -e " EVL_HEADER_5 " ] && bzip2 -dk " EVL_HEADER_5 ".bz2", 1);
+	_system(" [ ! -e " EVL_HEADER_5 " ] && xz -dk " EVL_HEADER_5 ".xz", 1);
 	/* valid header: payloadOffset=4096, key_size=32,
 	 * volume_key = bb21158c733229347bd4e681891e213d94c685be6a5b84818afe7a78a6de7a1a */
-	_system(" [ ! -e " VALID_HEADER " ] && bzip2 -dk " VALID_HEADER ".bz2", 1);
+	_system(" [ ! -e " VALID_HEADER " ] && xz -dk " VALID_HEADER ".xz", 1);
 
 	/* Prepare tcrypt images */
-	_system(" [ ! -d tcrypt-images ] && tar xjf tcrypt-images.tar.bz2 2>/dev/null", 1);
+	_system(" [ ! -d tcrypt-images ] && tar xJf tcrypt-images.tar.xz 2>/dev/null", 1);
 
 	_system("modprobe dm-crypt", 0);
 	_system("modprobe dm-verity", 0);
@@ -1072,6 +1076,18 @@ static void LuksHeaderRestore(void)
 	//_system("dmsetup table;sleep 1",1);
 	crypt_free(cd);
 
+	/* check crypt_header_restore() properly loads crypt_device context */
+	OK_(crypt_init(&cd, DMDIR L_DEVICE_OK));
+	OK_(crypt_wipe(cd, NULL, CRYPT_WIPE_ZERO, 0, 1*1024*1024, 1*1024*1024, 0, NULL, NULL));
+	OK_(crypt_header_restore(cd, CRYPT_LUKS1, VALID_HEADER));
+	OK_(crypt_activate_by_volume_key(cd, NULL, key, key_size, 0));
+	/* same test, any LUKS */
+	OK_(crypt_wipe(cd, NULL, CRYPT_WIPE_ZERO, 0, 1*1024*1024, 1*1024*1024, 0, NULL, NULL));
+	OK_(crypt_header_restore(cd, CRYPT_LUKS, VALID_HEADER));
+	OK_(crypt_activate_by_volume_key(cd, NULL, key, key_size, 0));
+
+	crypt_free(cd);
+
 	_cleanup_dmdevices();
 }
 
@@ -1762,20 +1778,20 @@ int main(int argc, char *argv[])
 	crypt_set_debug_level(_debug ? CRYPT_DEBUG_ALL : CRYPT_DEBUG_NONE);
 
 	RUN_(NonFIPSAlg, "Crypto is properly initialised in format"); //must be the first!
-	RUN_(AddDevicePlain, "plain device API creation exercise");
-	RUN_(HashDevicePlain, "plain device API hash test");
+	RUN_(AddDevicePlain, "A plain device API creation");
+	RUN_(HashDevicePlain, "A plain device API hash");
 	RUN_(AddDeviceLuks, "Format and use LUKS device");
-	RUN_(LuksHeaderLoad, "test header load");
-	RUN_(LuksHeaderRestore, "test LUKS header restore");
-	RUN_(LuksHeaderBackup, "test LUKS header backup");
-	RUN_(ResizeDeviceLuks, "Luks device resize tests");
+	RUN_(LuksHeaderLoad, "Header load");
+	RUN_(LuksHeaderRestore, "LUKS header restore");
+	RUN_(LuksHeaderBackup, "LUKS header backup");
+	RUN_(ResizeDeviceLuks, "LUKS device resize");
 	RUN_(UseLuksDevice, "Use pre-formated LUKS device");
-	RUN_(SuspendDevice, "Suspend/Resume test");
+	RUN_(SuspendDevice, "Suspend/Resume");
 	RUN_(UseTempVolumes, "Format and use temporary encrypted device");
-	RUN_(CallbacksTest, "API callbacks test");
-	RUN_(VerityTest, "DM verity test");
-	RUN_(TcryptTest, "Tcrypt API test");
-	RUN_(IntegrityTest, "Integrity API test");
+	RUN_(CallbacksTest, "API callbacks");
+	RUN_(VerityTest, "DM verity");
+	RUN_(TcryptTest, "Tcrypt API");
+	RUN_(IntegrityTest, "Integrity API");
 out:
 	_cleanup();
 	return 0;

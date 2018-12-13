@@ -1,6 +1,7 @@
 AUTHORS
 FAQ
 debian/README.gnupg
+debian/README.gnupg-sc
 debian/README.keyctl
 debian/README.opensc
 docs/*ReleaseNotes

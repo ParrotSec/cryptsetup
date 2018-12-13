@@ -487,9 +487,14 @@ to standard output.
 .PP
 \fIconvert\fR <device> \-\-type <format>
 .IP
-Converts the device between LUKS and LUKS2 format (if possible).
-The conversion will not be performed if there is an additional LUKS2 feature or LUKS has
+Converts the device between LUKS1 and LUKS2 format (if possible).
+The conversion will not be performed if there is an additional LUKS2 feature or LUKS1 has
 unsupported header size.
+
+Conversion (both directions) must be performed on inactive device. There must not be active
+dm-crypt mapping established for LUKS header requested for conversion.
+
+\fB\-\-type\fR option is mandatory with following accepted values: \fIluks1\fR or \fIluks2\fR.
 
 \fBWARNING:\fR The \fIconvert\fR action can destroy the LUKS header in the case of a crash
 during conversion or if a media error occurs.
@@ -1171,6 +1176,9 @@ Specify integrity algorithm to be used for authenticated disk encryption in LUKS
 
 \fBWARNING: This extension is EXPERIMENTAL\fR and requires dm-integrity
 kernel target (available since kernel version 4.12).
+For native AEAD modes, also enable "User-space interface for AEAD cipher algorithms"
+in "Cryptographic API" section (CONFIG_CRYPTO_USER_API_AEAD .config option).
+
 For more info, see \fIAUTHENTICATED DISK ENCRYPTION\fR section.
 .TP
 .B "\-\-integrity\-no\-journal"

@@ -37,6 +37,13 @@ Files: debian/scripts/luksformat
 Copyright: © 2005 Canonical Ltd.
 License: GPL-2+
 
+Files: debian/scripts/decrypt_gnupg-sc debian/README.gnupg-sc debian/initramfs/hooks/cryptgnupg-sc debian/initramfs/scripts/local-bottom/cryptgnupg-sc
+Copyright: © 2005-2015 Jonas Meurer <jonas@freesources.org>
+           © 2016-2018 Guilhem Moulin <guilhem@debian.org>
+           © 2009,2014 Peter Lebbing <peter@digitalbrains.com>
+           © 2018 Erik Nellessen
+License: GPL-2+
+
 Files: docs/examples/*
 Copyright: © 2011-2018 Red Hat, Inc.
 License: LGPL-2.1+

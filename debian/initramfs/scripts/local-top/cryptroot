@@ -83,7 +83,7 @@ setup_mapping() {
         return 0
     fi
 
-    crypttab_parse_options --export || return 1
+    crypttab_parse_options --export --missing-path=fail || return 1
 
     if ! wait_for_source; then
         # we've given up

@@ -28,7 +28,7 @@ copy_keys() {
     crypttab_parse_options
     if [ "${CRYPTTAB_OPTION_keyscript-}" = "/lib/cryptsetup/scripts/decrypt_opensc" ]; then
         if [ -f "$CRYPTTAB_KEY" ]; then
-            copy_file keyfile "$CRYPTTAB_KEY"
+            [ -f "$DESTDIR$CRYPTTAB_KEY" ] || copy_file keyfile "$CRYPTTAB_KEY" || RV=$?
         else
             cryptsetup_message "ERROR: Target $CRYPTTAB_NAME has a non-existing key file $CRYPTTAB_KEY"
             RV=1

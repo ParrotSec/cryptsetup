@@ -114,6 +114,22 @@ int LUKS2_find_area_gap(struct crypt_device *cd, struct luks2_hdr *hdr,
 	return 0;
 }
 
+int LUKS2_check_metadata_area_size(uint64_t metadata_size)
+{
+	/* see LUKS2_HDR2_OFFSETS */
+	return (metadata_size != 0x004000 &&
+		metadata_size != 0x008000 && metadata_size != 0x010000 &&
+		metadata_size != 0x020000 && metadata_size != 0x040000 &&
+		metadata_size != 0x080000 && metadata_size != 0x100000 &&
+		metadata_size != 0x200000 && metadata_size != 0x400000);
+}
+
+int LUKS2_check_keyslots_area_size(uint64_t keyslots_size)
+{
+	return (MISALIGNED_4K(keyslots_size) ||
+		keyslots_size > LUKS2_MAX_KEYSLOTS_SIZE);
+}
+
 int LUKS2_generate_hdr(
 	struct crypt_device *cd,
 	struct luks2_hdr *hdr,
@@ -122,9 +138,9 @@ int LUKS2_generate_hdr(
 	const char *cipherMode,
 	const char *integrity,
 	const char *uuid,
-	unsigned int sector_size,
-	unsigned int alignPayload,
-	unsigned int alignOffset,
+	unsigned int sector_size,  /* in bytes */
+	unsigned int alignPayload, /* in bytes */
+	unsigned int alignOffset,  /* in bytes */
 	int detached_metadata_device)
 {
 	struct json_object *jobj_segment, *jobj_integrity, *jobj_keyslots, *jobj_segments, *jobj_config;
@@ -182,11 +198,11 @@ int LUKS2_generate_hdr(
 	jobj_segment = json_object_new_object();
 	json_object_object_add(jobj_segment, "type", json_object_new_string("crypt"));
 	if (detached_metadata_device)
-		offset = (uint64_t)alignPayload * sector_size;
+		offset = (uint64_t)alignPayload;
 	else {
 		//FIXME
 		//offset = size_round_up(areas[7].offset + areas[7].length, alignPayload * SECTOR_SIZE);
-		offset = size_round_up(LUKS2_HDR_DEFAULT_LEN, (size_t)alignPayload * sector_size);
+		offset = size_round_up(LUKS2_HDR_DEFAULT_LEN, (size_t)alignPayload);
 		offset += alignOffset;
 	}
 
@@ -228,4 +244,45 @@ int LUKS2_generate_hdr(
 
 	JSON_DBG(hdr->jobj, "Header JSON");
 	return 0;
+}
+
+int LUKS2_wipe_header_areas(struct crypt_device *cd,
+	struct luks2_hdr *hdr)
+{
+	int r;
+	uint64_t offset, length;
+	size_t wipe_block;
+
+	/* Wipe complete header, keyslots and padding areas with zeroes. */
+	offset = 0;
+	length = LUKS2_get_data_offset(hdr) * SECTOR_SIZE;
+	wipe_block = 1024 * 1024;
+
+	if (LUKS2_hdr_validate(hdr->jobj, hdr->hdr_size - LUKS2_HDR_BIN_LEN))
+		return -EINVAL;
+
+	/* On detached header wipe at least the first 4k */
+	if (length == 0) {
+		length = 4096;
+		wipe_block = 4096;
+	}
+
+	log_dbg("Wiping LUKS areas (0x%06" PRIx64 " - 0x%06" PRIx64") with zeroes.",
+		offset, length + offset);
+
+	r = crypt_wipe_device(cd, crypt_metadata_device(cd), CRYPT_WIPE_ZERO,
+			      offset, length, wipe_block, NULL, NULL);
+	if (r < 0)
+		return r;
+
+	/* Wipe keyslot area */
+	wipe_block = 1024 * 1024;
+	offset = get_min_offset(hdr);
+	length = LUKS2_keyslots_size(hdr->jobj);
+
+	log_dbg("Wiping keyslots area (0x%06" PRIx64 " - 0x%06" PRIx64") with random data.",
+		offset, length + offset);
+
+	return crypt_wipe_device(cd, crypt_metadata_device(cd), CRYPT_WIPE_RANDOM,
+				 offset, length, wipe_block, NULL, NULL);
 }

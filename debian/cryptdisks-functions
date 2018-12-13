@@ -78,7 +78,7 @@ setup_mapping() {
     fi
 
     local loud="${DEFAULT_LOUD:-}"
-    crypttab_parse_options --export || return 1
+    crypttab_parse_options --export --missing-path=fail || return 1
     if [ -n "${CRYPTTAB_OPTION_quiet+x}" ]; then
         loud="no"
     elif [ -n "${CRYPTTAB_OPTION_loud+x}" ]; then

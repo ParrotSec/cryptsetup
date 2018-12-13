@@ -376,15 +376,12 @@ static void hex_key(char *hexkey, size_t key_size, const char *key)
 		sprintf(&hexkey[i * 2], "%02x", (unsigned char)key[i]);
 }
 
-/* get string length for key_size written in decimal system */
-static size_t get_key_size_strlen(size_t key_size)
+static size_t int_log10(size_t x)
 {
-	size_t ret = 1;
-
-	while ((key_size /= 10))
-		ret++;
-
-	return ret;
+	size_t r = 0;
+	for (x /= 10; x > 0; x /= 10)
+		r++;
+	return r;
 }
 
 #define CLEN    64   /* 2*MAX_CIPHER_LEN */
@@ -397,7 +394,7 @@ static int cipher_c2dm(const char *org_c, const char *org_i, unsigned tag_size,
 		       char *i_dm, int i_dm_size)
 {
 	int c_size = 0, i_size = 0, i;
-	char cipher[CLEN], mode[CLEN], iv[CLEN], tmp[CLEN];
+	char cipher[CLEN], mode[CLEN], iv[CLEN+1], tmp[CLEN];
 	char capi[CAPIL];
 
 	if (!c_dm || !c_dm_size || !i_dm || !i_dm_size)
@@ -410,7 +407,7 @@ static int cipher_c2dm(const char *org_c, const char *org_i, unsigned tag_size,
 	i = sscanf(tmp, "%" CLENS "[^-]-%" CLENS "s", mode, iv);
 	if (i == 1) {
 		memset(iv, 0, sizeof(iv));
-		strncpy(iv, mode, sizeof(iv) - 1);
+		strncpy(iv, mode, sizeof(iv)-1);
 		*mode = '\0';
 		if (snprintf(capi, sizeof(capi), "%s", cipher) < 0)
 			return -EINVAL;
@@ -457,7 +454,7 @@ static int cipher_c2dm(const char *org_c, const char *org_i, unsigned tag_size,
 static int cipher_dm2c(char **org_c, char **org_i, const char *c_dm, const char *i_dm)
 {
 	char cipher[CLEN], mode[CLEN], iv[CLEN], auth[CLEN];
-	char tmp[CAPIL*2], capi[CAPIL];
+	char tmp[CAPIL], dmcrypt_tmp[CAPIL*2], capi[CAPIL+1];
 	size_t len;
 	int i;
 
@@ -500,16 +497,16 @@ static int cipher_dm2c(char **org_c, char **org_i, const char *c_dm, const char 
 		} else
 			*org_i = NULL;
 		memset(capi, 0, sizeof(capi));
-		strncpy(capi, tmp, sizeof(capi) - 1);
+		strncpy(capi, tmp, sizeof(capi)-1);
 	}
 
 	i = sscanf(capi, "%" CLENS "[^(](%" CLENS "[^)])", mode, cipher);
 	if (i == 2)
-		snprintf(tmp, sizeof(tmp), "%s-%s-%s", cipher, mode, iv);
+		snprintf(dmcrypt_tmp, sizeof(dmcrypt_tmp), "%s-%s-%s", cipher, mode, iv);
 	else
-		snprintf(tmp, sizeof(tmp), "%s-%s", capi, iv);
+		snprintf(dmcrypt_tmp, sizeof(dmcrypt_tmp), "%s-%s", capi, iv);
 
-	if (!(*org_c = strdup(tmp))) {
+	if (!(*org_c = strdup(dmcrypt_tmp))) {
 		free(*org_i);
 		*org_i = NULL;
 		return -ENOMEM;
@@ -561,7 +558,7 @@ static char *get_dm_crypt_params(struct crypt_dm_active_device *dmd, uint32_t fl
 		null_cipher = 1;
 
 	if (flags & CRYPT_ACTIVATE_KEYRING_KEY) {
-		keystr_len = strlen(dmd->u.crypt.vk->key_description) + get_key_size_strlen(dmd->u.crypt.vk->keylength) + 9;
+		keystr_len = strlen(dmd->u.crypt.vk->key_description) + int_log10(dmd->u.crypt.vk->keylength) + 10;
 		hexkey = crypt_safe_alloc(keystr_len);
 	} else
 		hexkey = crypt_safe_alloc(null_cipher ? 2 : (dmd->u.crypt.vk->keylength * 2 + 1));
@@ -687,7 +684,7 @@ static char *get_dm_integrity_params(struct crypt_dm_active_device *dmd, uint32_
 {
 	int r, max_size, num_options = 0;
 	char *params, *hexkey, mode;
-	char features[256], feature[256];
+	char features[512], feature[256];
 
 	if (!dmd)
 		return NULL;
@@ -2131,7 +2128,7 @@ int dm_resume_and_reinstate_key(struct crypt_device *cd, const char *name,
 		goto out;
 
 	if (vk->key_description)
-		msg_size = strlen(vk->key_description) + get_key_size_strlen(vk->keylength) + 17;
+		msg_size = strlen(vk->key_description) + int_log10(vk->keylength) + 18;
 	else
 		msg_size = vk->keylength * 2 + 10; // key set <key>
 

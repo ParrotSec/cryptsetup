@@ -23,11 +23,15 @@ PWD0="compatkey"
 PWD1="93R4P4pIqAH8"
 PWD2="mymJeD8ivEhE"
 PWD3="ocMakf3fAcQO"
+PWD4="Qx3qn46vq0v"
 PWDW="rUkL4RUryBom"
 TEST_KEYRING_NAME="compattest2_keyring"
 TEST_TOKEN0="compattest2_desc0"
 TEST_TOKEN1="compattest2_desc1"
 VK_FILE="compattest2_vkfile"
+IMPORT_TOKEN="{\"type\":\"some_type\",\"keyslots\":[],\"base64_data\":\"zxI7vKB1Qwl4VPB4D-N-OgcC14hPCG0IDu8O7eCqaQ\"}"
+TOKEN_FILE0=test-token-file0
+TOKEN_FILE1=test-token-file1
 
 FAST_PBKDF_OPT="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
 
@@ -47,7 +51,7 @@ function remove_mapping()
 	[ -b /dev/mapper/$DEV_NAME2 ] && dmsetup remove $DEV_NAME2
 	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove $DEV_NAME
 	losetup -d $LOOPDEV >/dev/null 2>&1
-	rm -f $ORIG_IMG $IMG $IMG10 $KEY1 $KEY2 $KEY5 $KEYE $HEADER_IMG $HEADER_KEYU $VK_FILE $HEADER_LUKS2_PV missing-file >/dev/null 2>&1
+	rm -f $ORIG_IMG $IMG $IMG10 $KEY1 $KEY2 $KEY5 $KEYE $HEADER_IMG $HEADER_KEYU $VK_FILE $HEADER_LUKS2_PV missing-file $TOKEN_FILE0 $TOKEN_FILE1 test_image_* >/dev/null 2>&1
 
 	# unlink whole test keyring
 	[ -n "$TEST_KEYRING" ] && keyctl unlink $TEST_KEYRING "@u" >/dev/null
@@ -93,26 +97,26 @@ function prepare()
 	case "$2" in
 	wipe)
 		remove_mapping
-		dd if=/dev/zero of=$IMG bs=1k count=10000 >/dev/null 2>&1
+		dd if=/dev/zero of=$IMG bs=4096 count=5000 >/dev/null 2>&1
 		sync
 		losetup $LOOPDEV $IMG
 		;;
 	new)
 		remove_mapping
-		bzip2 -cd compatimage.img.bz2 > $IMG
+		xz -cd compatimage.img.xz > $IMG
 		xz -dk $HEADER_KEYU.xz
 		# FIXME: switch to internal loop (no losetup at all)
 		echo "bad" | $CRYPTSETUP luksOpen --key-slot 0 --test-passphrase $IMG 2>&1 | \
 			grep "autoclear flag" && skip "WARNING: Too old kernel, test skipped."
 		losetup $LOOPDEV $IMG
-		bzip2 -cd compatv10image.img.bz2 > $IMG10
+		xz -cd compatv10image.img.xz > $IMG10
 		;;
 	reuse | *)
 		if [ ! -e $IMG ]; then
-			bzip2 -cd compatimage.img.bz2 > $IMG
+			xz -cd compatimage.img.xz > $IMG
 			losetup $LOOPDEV $IMG
 		fi
-		[ ! -e $IMG10 ] && bzip2 -cd compatv10image.img.bz2 > $IMG10
+		[ ! -e $IMG10 ] && xz -cd compatv10image.img.xz > $IMG10
 		;;
 	esac
 
@@ -132,10 +136,6 @@ function prepare()
 
 	if [ ! -e $KEYE ]; then
 		touch $KEYE
-	fi
-
-	if [ ! -e $VK_FILE ]; then
-		touch $VK_FILE
 	fi
 
 	cp $IMG $ORIG_IMG
@@ -209,7 +209,21 @@ export LANG=C
 [ -z "$LOOPDEV" ] && skip "WARNING: Cannot find free loop device, test skipped."
 [ -d "$LOCK_DIR" ] || skip "WARNING: LUKS2 locking directory ($LOCK_DIR) is missing, test skipped."
 
-# LUKS tests
+prepare "[2] Sector size and old payload alignment" wipe
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --sector-size  511 2>/dev/null && fail
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --sector-size  256 2>/dev/null && fail
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --sector-size 8192 2>/dev/null && fail
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --sector-size  512 || fail
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --align-payload 5 || fail
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --sector-size  512 --align-payload 5 || fail
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --sector-size 2048 --align-payload 32 || fail
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --sector-size 4096 || fail
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --sector-size 2048 --align-payload 32768 || fail
+$CRYPTSETUP -q luksDump  $LOOPDEV | grep -q "offset: $((512 * 32768)) \[bytes\]" || fail
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --sector-size 2048 || fail
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -q --sector-size 4096 --align-payload 32768 || fail
+$CRYPTSETUP -q luksDump  $LOOPDEV | grep -q "offset: $((512 * 32768)) \[bytes\]" || fail
+
 prepare "[3] format" new
 echo $PWD1 | $CRYPTSETUP -q $FAST_PBKDF_OPT -c aes-cbc-essiv:sha256 -s 128 luksFormat --type luks2 $LOOPDEV || fail
 prepare "[4] format using hash sha512" wipe
@@ -398,7 +412,7 @@ $CRYPTSETUP -q status  $DEV_NAME | grep "mode:" | grep -q "readonly" || fail
 $CRYPTSETUP -q resize  $DEV_NAME --size 100 || fail
 $CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "100 sectors" || fail
 $CRYPTSETUP -q resize  $DEV_NAME || fail
-$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "19997 sectors" || fail
+$CRYPTSETUP -q status  $DEV_NAME | grep "size:" | grep -q "39997 sectors" || fail
 # Resize underlying loop device as well
 truncate -s 16M $IMG || fail
 $CRYPTSETUP -q resize  $DEV_NAME || fail
@@ -460,18 +474,18 @@ $CRYPTSETUP luksDump $LOOPDEV | grep -q $TEST_UUID || fail
 echo $PWDW | $CRYPTSETUP luksDump $LOOPDEV --dump-master-key 2>/dev/null && fail
 echo $PWD1 | $CRYPTSETUP luksDump $LOOPDEV --dump-master-key | grep -q "MK dump:" || can_fail_fips
 $CRYPTSETUP luksDump -q $LOOPDEV --dump-master-key -d $KEY1 | grep -q "MK dump:" || can_fail_fips
-echo $PWD1 | $CRYPTSETUP luksDump -q $LOOPDEV --dump-master-key --master-key-file missing-file 2> /dev/null && fail
-echo $PWD1 | $CRYPTSETUP luksDump -q $LOOPDEV --dump-master-key --master-key-file $VK_FILE > /dev/null || can_fail_fips
+echo $PWD1 | $CRYPTSETUP luksDump -q $LOOPDEV --dump-master-key --master-key-file $VK_FILE >/dev/null || can_fail_fips
+echo $PWD1 | $CRYPTSETUP luksDump -q $LOOPDEV --dump-master-key --master-key-file $VK_FILE 2>/dev/null && fail
 fips_mode || {
 	echo $PWD1 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT --master-key-file $VK_FILE $LOOPDEV || fail
 }
 
 prepare "[22] remove disappeared device" wipe
-dmsetup create $DEV_NAME --table "0 10000 linear $LOOPDEV 2" || fail
+dmsetup create $DEV_NAME --table "0 39998 linear $LOOPDEV 2" || fail
 echo $PWD1 | $CRYPTSETUP -q $FAST_PBKDF_OPT luksFormat --type luks2 /dev/mapper/$DEV_NAME || fail
 echo $PWD1 | $CRYPTSETUP -q luksOpen /dev/mapper/$DEV_NAME $DEV_NAME2 || fail
 # underlying device now returns error but node is still present
-dmsetup load $DEV_NAME --table "0 10000 error" || fail
+dmsetup load $DEV_NAME --table "0 40000 error" || fail
 dmsetup resume $DEV_NAME || fail
 $CRYPTSETUP -q luksClose $DEV_NAME2 || fail
 dmsetup remove $DEV_NAME || fail
@@ -673,7 +687,7 @@ if dm_crypt_keyring_flawed; then
 fi
 
 if dm_crypt_keyring_support; then
-	prepare "[32b] LUKS2 key in keyring" wipe
+	prepare "[32] LUKS2 key in keyring" wipe
 	echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV --header $HEADER_IMG || fail
 	# check keyring support detection works as expected
 	rmmod dm-crypt > /dev/null 2>&1 || true
@@ -699,12 +713,12 @@ if dm_crypt_keyring_support; then
 fi
 
 # FIXME: candidate for non-root tests
+prepare "[33] tokens" wipe
+echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV || fail
 if [ $HAVE_KEYRING -gt 0 ]; then
-	prepare "[33] tokens" wipe
 
 	test_and_prepare_keyring
 
-	echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV || fail
 	$CRYPTSETUP token add $LOOPDEV --key-description $TEST_TOKEN0 --token-id 3 || fail
 	$CRYPTSETUP luksDump $LOOPDEV | grep -q -e "3: luks2-keyring" || fail
 	# keyslot 5 is inactive
@@ -727,6 +741,18 @@ if [ $HAVE_KEYRING -gt 0 ]; then
 	$CRYPTSETUP token add $LOOPDEV --key-description $TEST_TOKEN1 --key-slot 4 || fail
 	$CRYPTSETUP -q luksKillSlot $LOOPDEV 4 || fail
 fi
+echo -n "$IMPORT_TOKEN" | $CRYPTSETUP token import $LOOPDEV --token-id 10 || fail
+echo -n "$IMPORT_TOKEN" | $CRYPTSETUP token import $LOOPDEV --token-id 11 --json-file - || fail
+echo -n "$IMPORT_TOKEN" > $TOKEN_FILE0
+$CRYPTSETUP token import $LOOPDEV --token-id 12 --json-file $TOKEN_FILE0 || fail
+$CRYPTSETUP token import $LOOPDEV --token-id 12 --json-file $TOKEN_FILE0 2>/dev/null && fail
+$CRYPTSETUP token export $LOOPDEV --token-id 10 | diff --from-file - $TOKEN_FILE0 || fail
+$CRYPTSETUP token export $LOOPDEV --token-id 11 | diff --from-file - $TOKEN_FILE0 || fail
+$CRYPTSETUP token export $LOOPDEV --token-id 12 | diff --from-file - $TOKEN_FILE0 || fail
+$CRYPTSETUP token export $LOOPDEV --token-id 12 --json-file $TOKEN_FILE1 || fail
+diff $TOKEN_FILE0 $TOKEN_FILE1 || fail
+$CRYPTSETUP token export $LOOPDEV --token-id 12 > $TOKEN_FILE1 || fail
+diff $TOKEN_FILE0 $TOKEN_FILE1 || fail
 
 prepare "[34] LUKS keyslot priority" wipe
 echo $PWD1 | $CRYPTSETUP luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV -S 1 || fail
@@ -763,7 +789,7 @@ echo $PWD1 | $CRYPTSETUP luksFormat --type luks2 --pbkdf pbkdf2   --pbkdf-force-
 echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 --pbkdf pbkdf2   --pbkdf-force-iterations 1234 $LOOPDEV || fail
 $CRYPTSETUP luksDump $LOOPDEV | grep "Iterations:" | grep -q "1234" || fail
 echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 --pbkdf argon2id --pbkdf-force-iterations 3 $LOOPDEV 2>/dev/null && fail
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 --pbkdf argon2id --pbkdf-force-iterations 4 $LOOPDEV || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 --pbkdf argon2id --pbkdf-force-iterations 4 --pbkdf-memory 100000 $LOOPDEV || fail
 $CRYPTSETUP luksDump $LOOPDEV | grep "PBKDF:" | grep -q "argon2id" || fail
 echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 --pbkdf argon2i  --pbkdf-force-iterations 4 \
 	--pbkdf-memory 1234 --pbkdf-parallel 1 $LOOPDEV || fail
@@ -780,7 +806,7 @@ echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 --pbkdf pbkdf2 -i 500 $LOOPD
 
 prepare "[37] LUKS Keyslot convert" wipe
 $CRYPTSETUP -q luksFormat $FAST_PBKDF_OPT --type luks1 $LOOPDEV $KEY5 --key-slot 5 || fail
-$CRYPTSETUP -q luksConvertKey $LOOPDEV --key-file $KEY5 && fail
+$CRYPTSETUP -q luksConvertKey $LOOPDEV --key-file $KEY5 2>/dev/null && fail
 $CRYPTSETUP -q convert --type luks2 $LOOPDEV || fail
 $CRYPTSETUP luksDump $LOOPDEV | grep -q "5: luks2" || fail
 $CRYPTSETUP luksDump $LOOPDEV | grep "PBKDF:" | grep -q "pbkdf2" || fail
@@ -792,6 +818,8 @@ $CRYPTSETUP luksDump $LOOPDEV | grep -q "1: luks2" || fail
 $CRYPTSETUP luksDump $LOOPDEV | grep "PBKDF:" | grep -q "pbkdf2" || fail
 echo $PWD1 | $CRYPTSETUP -q luksConvertKey $LOOPDEV -S 1 --pbkdf argon2i -i1 --pbkdf-memory 32 || fail
 $CRYPTSETUP luksDump $LOOPDEV | grep -q "1: luks2" || fail
+echo $PWD3 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT -S 21 --unbound -s 16 $LOOPDEV || fail
+echo $PWD3 | $CRYPTSETUP luksConvertKey --pbkdf-force-iterations 1001 --pbkdf pbkdf2 -S 21 $LOOPDEV || fail
 
 prepare "[38] luksAddKey unbound tests" wipe
 $CRYPTSETUP -q luksFormat $FAST_PBKDF_OPT --type luks2 $LOOPDEV $KEY5 --key-slot 5 || fail
@@ -812,8 +840,12 @@ echo $PWD2 | $CRYPTSETUP -q open -S2 $LOOPDEV $DEV_NAME 2> /dev/null && fail
 echo $PWD2 | $CRYPTSETUP -q open -S2 $LOOPDEV --test-passphrase || fail
 echo $PWD1 | $CRYPTSETUP -q open $LOOPDEV $DEV_NAME 2> /dev/null && fail
 echo $PWD1 | $CRYPTSETUP -q open $LOOPDEV --test-passphrase || fail
+# check we're able to change passphrase for unbound keyslot
+echo -e "$PWD2\n$PWD3" | $CRYPTSETUP luksChangeKey $FAST_PBKDF_OPT -S 2 $LOOPDEV || fail
+echo $PWD3 | $CRYPTSETUP open --test-passphrase $FAST_PBKDF_OPT -S 2 $LOOPDEV || fail
+echo $PWD3 | $CRYPTSETUP -q open -S 2 $LOOPDEV $DEV_NAME 2> /dev/null && fail
 # do not allow adding keyslot by unbound keyslot
-echo -e "$PWD2\n$PWD1" | $CRYPTSETUP -q luksAddKey $LOOPDEV 2> /dev/null && fail
+echo -e "$PWD3\n$PWD1" | $CRYPTSETUP -q luksAddKey $LOOPDEV 2> /dev/null && fail
 # check adding keyslot works when there's unbound keyslot
 echo $PWD1 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT $LOOPDEV --key-file $KEY5 -S8 || fail
 echo $PWD1 | $CRYPTSETUP open $LOOPDEV $DEV_NAME || fail
@@ -822,6 +854,22 @@ $CRYPTSETUP luksKillSlot -q $LOOPDEV 2
 $CRYPTSETUP luksDump $LOOPDEV | grep -q "2: luks2 (unbound)" && fail
 $CRYPTSETUP luksKillSlot -q $LOOPDEV 3
 $CRYPTSETUP luksDump $LOOPDEV | grep -q "3: luks2 (unbound)" && fail
+
+prepare "[39] LUKS2 metadata variants" wipe
+tar xJf luks2_mda_images.tar.xz
+echo -n "$IMPORT_TOKEN" > $TOKEN_FILE0
+for mda in 16 32 64 128 256 512 1024 2048 4096 ; do
+	echo -n "[$mda KiB]"
+	echo $PWD4 | $CRYPTSETUP open test_image_$mda $DEV_NAME || fail
+	$CRYPTSETUP close $DEV_NAME || fail
+	echo -e "$PWD4\n$PWD3" | $CRYPTSETUP luksAddKey -S9 $FAST_PBKDF_OPT test_image_$mda || fail
+	echo $PWD4 | $CRYPTSETUP open --test-passphrase test_image_$mda || fail
+	echo $PWD3 | $CRYPTSETUP open -S9 --test-passphrase test_image_$mda || fail
+	echo -n "$IMPORT_TOKEN" | $CRYPTSETUP token import test_image_$mda --token-id 10 || fail
+	$CRYPTSETUP token export test_image_$mda --token-id 10 | diff --from-file - $TOKEN_FILE0 || fail
+	echo -n "[OK]"
+done
+echo
 
 remove_mapping
 exit 0

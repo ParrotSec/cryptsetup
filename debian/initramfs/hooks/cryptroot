@@ -130,7 +130,7 @@ crypttab_find_and_print_entry() {
     if ! grep -Fxqz -e "$target" -- "$DESTDIR/cryptroot/targets"; then
         printf '%s\0' "$target" >>"$DESTDIR/cryptroot/targets"
         crypttab_find_entry "$target" || return 1
-        crypttab_parse_options        || return 1
+        crypttab_parse_options --missing-path=warn || return 1
         crypttab_print_entry
     fi
 }
@@ -165,10 +165,6 @@ crypttab_print_entry() {
         # luck with the unchanged _CRYPTTAB_SOURCE value
     fi
 
-    if [ -n "${CRYPTTAB_OPTION_header+x}" ] && [ ! -f "$CRYPTTAB_OPTION_header" ]; then
-        cryptsetup_message "WARNING: Target $CRYPTTAB_NAME has an invalid header $CRYPTTAB_OPTION_header"
-    fi
-
     # if keyscript is set, the "key" is just an argument to the script
     if [ -z "${CRYPTTAB_OPTION_keyscript+x}" ] && [ "$CRYPTTAB_KEY" != "none" ]; then
         crypttab_key_check || return 1
@@ -177,7 +173,9 @@ crypttab_print_entry() {
                 mkdir -pm0700 -- "$DESTDIR/cryptroot/keyfiles"
                 # $CRYPTTAB_NAME can't contain '/' (even after unmangling)
                 keyfile="/cryptroot/keyfiles/$CRYPTTAB_NAME.key"
-                copy_file keyfile "$CRYPTTAB_KEY" "$keyfile"
+                if [ ! -f "$DESTDIR$keyfile" ] && ! copy_file keyfile "$CRYPTTAB_KEY" "$keyfile"; then
+                    cryptsetup_message "WARNING: couldn't copy keyfile $CRYPTTAB_KEY"
+                fi
                 _CRYPTTAB_KEY="/cryptroot/keyfiles/$_CRYPTTAB_NAME.key" # preserve mangled name
                 ;;
             *)

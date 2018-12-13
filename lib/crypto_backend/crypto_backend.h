@@ -99,8 +99,8 @@ int argon2(const char *type, const char *password, size_t password_length,
 uint32_t crypt_crc32(uint32_t seed, const unsigned char *buf, size_t len);
 
 /* ciphers */
-int crypt_cipher_blocksize(const char *name);
-int crypt_cipher_wrapped_key(const char *name);
+int crypt_cipher_ivsize(const char *name, const char *mode);
+int crypt_cipher_wrapped_key(const char *name, const char *mode);
 int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
 		    const char *mode, const void *key, size_t key_length);
 void crypt_cipher_destroy(struct crypt_cipher *ctx);
@@ -110,6 +110,10 @@ int crypt_cipher_encrypt(struct crypt_cipher *ctx,
 int crypt_cipher_decrypt(struct crypt_cipher *ctx,
 			 const char *in, char *out, size_t length,
 			 const char *iv, size_t iv_length);
+
+/* Check availability of a cipher */
+int crypt_cipher_check(const char *name, const char *mode,
+		       const char *integrity, size_t key_length);
 
 /* storage encryption wrappers */
 int crypt_storage_init(struct crypt_storage **ctx, uint64_t sector_start,
@@ -124,8 +128,12 @@ int crypt_storage_encrypt(struct crypt_storage *ctx, uint64_t sector,
 /* Memzero helper (memset on stack can be optimized out) */
 static inline void crypt_backend_memzero(void *s, size_t n)
 {
+#ifdef HAVE_EXPLICIT_BZERO
+	explicit_bzero(s, n);
+#else
 	volatile uint8_t *p = (volatile uint8_t *)s;
 	while(n--) *p++ = 0;
+#endif
 }
 
 #endif /* _CRYPTO_BACKEND_H */

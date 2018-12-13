@@ -104,19 +104,19 @@ function prepare()
 		;;
 	new)
 		remove_mapping
-		bzip2 -cd compatimage.img.bz2 > $IMG
+		xz -cd compatimage.img.xz > $IMG
 		# FIXME: switch to internal loop (no losetup at all)
 		echo "bad" | $CRYPTSETUP luksOpen --key-slot 0 --test-passphrase $IMG 2>&1 | \
 			grep "autoclear flag" && skip "WARNING: Too old kernel, test skipped."
 		losetup $LOOPDEV $IMG
-		bzip2 -cd compatv10image.img.bz2 > $IMG10
+		xz -cd compatv10image.img.xz > $IMG10
 		;;
 	reuse | *)
 		if [ ! -e $IMG ]; then
-			bzip2 -cd compatimage.img.bz2 > $IMG
+			xz -cd compatimage.img.xz > $IMG
 			losetup $LOOPDEV $IMG
 		fi
-		[ ! -e $IMG10 ] && bzip2 -cd compatv10image.img.bz2 > $IMG10
+		[ ! -e $IMG10 ] && xz -cd compatv10image.img.xz > $IMG10
 		;;
 	esac
 
@@ -136,10 +136,6 @@ function prepare()
 
 	if [ ! -e $KEYE ]; then
 		touch $KEYE
-	fi
-
-	if [ ! -e $VK_FILE ]; then
-		touch $VK_FILE
 	fi
 
 	cp $IMG $ORIG_IMG
@@ -241,8 +237,8 @@ $CRYPTSETUP luksDump $IMG | grep -q $TEST_UUID || fail
 echo $PWDW | $CRYPTSETUP luksDump $IMG --dump-master-key 2>/dev/null && fail
 echo $PWD1 | $CRYPTSETUP luksDump $IMG --dump-master-key | grep -q "MK dump:" || can_fail_fips
 $CRYPTSETUP luksDump -q $IMG --dump-master-key -d $KEY1 | grep -q "MK dump:" || can_fail_fips
-echo $PWD1 | $CRYPTSETUP luksDump -q $IMG --dump-master-key --master-key-file missing-file 2> /dev/null && fail
-echo $PWD1 | $CRYPTSETUP luksDump -q $IMG --dump-master-key --master-key-file $VK_FILE > /dev/null || can_fail_fips
+echo $PWD1 | $CRYPTSETUP luksDump -q $IMG --dump-master-key --master-key-file $VK_FILE >/dev/null || can_fail_fips
+echo $PWD1 | $CRYPTSETUP luksDump -q $IMG --dump-master-key --master-key-file $VK_FILE 2>/dev/null && fail
 fips_mode || {
 	echo $PWD1 | $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT --master-key-file $VK_FILE $IMG || fail
 }
@@ -853,7 +849,7 @@ prepare "[37] Interactive add key." new
 expect - >/dev/null <<EOF
 proc abort {} { send_error "Timeout. "; exit 2 }
 set timeout 10
-eval spawn $CRYPTSETUP luksAddKey $FAST_PBKDF_OPT -v $LOOPDEV
+eval spawn $CRYPTSETUP luksAddKey -S 2 $FAST_PBKDF_OPT -v $LOOPDEV
 expect timeout abort "Enter any existing passphrase:"
 sleep 0.1
 send "$PWD0\n"
@@ -870,6 +866,15 @@ expect timeout abort "Enter passphrase"
 sleep 0.1
 send "$PWD1\n"
 expect timeout abort "Command successful."
+expect timeout abort eof
+eval spawn $CRYPTSETUP luksKillSlot -v $LOOPDEV 1
+expect timeout abort "Keyslot 1 is not active."
+expect timeout abort eof
+eval spawn $CRYPTSETUP luksKillSlot -v $LOOPDEV 2
+expect timeout abort "Enter any remaining passphrase:"
+sleep 0.1
+send "$PWD0\n"
+expect timeout abort "Key slot 2 removed."
 expect timeout abort eof
 exit
 EOF

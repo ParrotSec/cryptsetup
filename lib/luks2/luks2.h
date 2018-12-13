@@ -35,6 +35,7 @@
 
 #define LUKS2_KEYSLOTS_MAX       32
 #define LUKS2_TOKENS_MAX         32
+#define LUKS2_SEGMENT_MAX        32
 
 #define LUKS2_BUILTIN_TOKEN_PREFIX "luks2-"
 #define LUKS2_BUILTIN_TOKEN_PREFIX_LEN 6
@@ -329,6 +330,12 @@ int LUKS2_generate_hdr(
 	unsigned int alignPayload,
 	unsigned int alignOffset,
 	int detached_metadata_device);
+
+int LUKS2_check_metadata_area_size(uint64_t metadata_size);
+int LUKS2_check_keyslots_area_size(uint64_t keyslots_size);
+
+int LUKS2_wipe_header_areas(struct crypt_device *cd,
+	struct luks2_hdr *hdr);
 
 uint64_t LUKS2_get_data_offset(struct luks2_hdr *hdr);
 int LUKS2_get_sector_size(struct luks2_hdr *hdr);

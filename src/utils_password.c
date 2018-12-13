@@ -94,25 +94,6 @@ static int tools_check_pwquality(const char *password)
 }
 #endif /* ENABLE_PWQUALITY || ENABLE_PASSWDQC */
 
-int tools_is_cipher_null(const char *cipher)
-{
-	if (!cipher)
-		return 0;
-
-	return !strcmp(cipher, "cipher_null") ? 1 : 0;
-}
-
-/*
- * Keyfile - is standard input treated as a binary file (no EOL handling).
- */
-int tools_is_stdin(const char *key_file)
-{
-	if (!key_file)
-		return 1;
-
-	return strcmp(key_file, "-") ? 0 : 1;
-}
-
 /* Password reading helpers */
 static int untimed_read(int fd, char *pass, size_t maxlen)
 {
@@ -334,7 +315,7 @@ int tools_write_mk(const char *file, const char *key, int keysize)
 {
 	int fd, r = -EINVAL;
 
-	fd = open(file, O_WRONLY);
+	fd = open(file, O_CREAT|O_EXCL|O_WRONLY, S_IRUSR);
 	if (fd < 0) {
 		log_err(_("Cannot open keyfile %s for write."), file);
 		return r;

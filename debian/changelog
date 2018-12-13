@@ -1,3 +1,21 @@
+cryptsetup (2:2.0.6-1parrot1) testing; urgency=medium
+
+  * Import new Debian release.
+  * Preserve Kali NUKE patch.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Thu, 13 Dec 2018 18:20:37 +0100
+
+cryptsetup (2:2.0.6-1) unstable; urgency=medium
+
+  * New upstream bugfix release.  Highlights include:
+    - Fix support of larger metadata areas in LUKS2 header.
+    - Fix checking of device size alignment and hash & AEAD algorithms to
+      avoid formatting devices that later cannot be activated.
+    - Fix cryptsetup-reencrypt interrupt handling.
+    - Allow Adiantum cipher construction (require Linux 4.21 or later).
+
+ -- Guilhem Moulin <guilhem@debian.org>  Mon, 03 Dec 2018 20:16:07 +0100
+
 cryptsetup (2:2.0.4-3parrot1) testing; urgency=medium
 
   * Import new Debian release.
