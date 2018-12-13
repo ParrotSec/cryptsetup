@@ -18,8 +18,7 @@ LUKS Design
 -----------
 **LUKS** is the standard for Linux hard disk encryption. By providing a standard on-disk-format, it does not  
 only facilitate compatibility among distributions, but also provides secure management of multiple user passwords.  
-In contrast to existing solution, LUKS stores all setup necessary setup information in the partition header,  
-enabling the user to transport or migrate his data seamlessly.
+LUKS stores all necessary setup information in the partition header, enabling to transport or migrate data seamlessly.
 
 Last version of the LUKS format specification is
 [available here](https://www.kernel.org/pub/linux/utils/cryptsetup/LUKS_docs/on-disk-format.pdf).
@@ -42,13 +41,19 @@ Download
 --------
 All release tarballs and release notes are hosted on [kernel.org](https://www.kernel.org/pub/linux/utils/cryptsetup/).
 
-**The latest cryptsetup version is 2.0.3**
-  * [cryptsetup-2.0.3.tar.xz](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.3.tar.xz)
-  * Signature [cryptsetup-2.0.3.tar.sign](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.3.tar.sign)
+**The latest cryptsetup version is 2.0.5**
+  * [cryptsetup-2.0.5.tar.xz](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.5.tar.xz)
+  * Signature [cryptsetup-2.0.5.tar.sign](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.5.tar.sign)
     _(You need to decompress file first to check signature.)_
-  * [Cryptsetup 2.0.3 Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.3-ReleaseNotes).
+  * [Cryptsetup 2.0.5 Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.5-ReleaseNotes).
 
 Previous versions
+ * [Version 2.0.4](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.4.tar.xz) -
+   [Signature](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.4.tar.sign) -
+   [Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.4-ReleaseNotes).
+ * [Version 2.0.3](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.3.tar.xz) -
+   [Signature](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.3.tar.sign) -
+   [Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.3-ReleaseNotes).
  * [Version 2.0.2](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.2.tar.xz) -
    [Signature](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.2.tar.sign) -
    [Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.2-ReleaseNotes).

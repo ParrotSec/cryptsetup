@@ -354,7 +354,7 @@ static int _setup(void)
 	fd = loop_attach(&DEVICE_6, IMAGE_PV_LUKS2_SEC, 0, 0, &ro);
 	close(fd);
 
-	_system(" [ ! -d " CONV_DIR " ] && tar xJf " CONV_DIR ".tar.xz", 1);
+	_system(" [ ! -d " CONV_DIR " ] && tar xJf " CONV_DIR ".tar.xz 2>/dev/null", 1);
 
 	if (_system("modprobe dm-crypt", 1))
 		return 1;
@@ -426,13 +426,11 @@ static int test_open(struct crypt_device *cd,
 		     void *usrptr)
 {
 	const char *str = (const char *)usrptr;
-	char *buf = malloc(strlen(str));
-	if (!buf)
-		return -ENOMEM;
 
-	strncpy(buf, str, strlen(str));
-	*buffer = buf;
-	*buffer_len = strlen(str);
+	*buffer = strdup(str);
+	if (!*buffer)
+		return -ENOMEM;
+	*buffer_len = strlen(*buffer);
 
 	return 0;
 }
@@ -868,6 +866,7 @@ static void UseTempVolumes(void)
 
 static void Luks2HeaderRestore(void)
 {
+	char key[128];
 	struct crypt_device *cd;
 	struct crypt_pbkdf_type pbkdf = {
 		.type = CRYPT_KDF_ARGON2I,
@@ -890,7 +889,7 @@ static void Luks2HeaderRestore(void)
 	struct crypt_params_luks1 luks1 = {
 		.data_alignment = 8192, // 4M offset to pass alignment test
 	};
-	char key[128];
+	uint32_t flags = 0;
 
 	const char *mk_hex = "bb21158c733229347bd4e681891e213d94c685be6a5b84818afe7a78a6de7a1a";
 	size_t key_size = strlen(mk_hex) / 2;
@@ -943,6 +942,22 @@ static void Luks2HeaderRestore(void)
 	OK_(crypt_init(&cd, DMDIR L_DEVICE_OK));
 	OK_(crypt_load(cd, CRYPT_LUKS, NULL));
 	FAIL_(crypt_header_restore(cd, CRYPT_LUKS2, NO_REQS_LUKS2_HEADER), "LUKS1 format detected");
+	crypt_free(cd);
+
+	/* check crypt_header_restore() properly loads crypt_device context */
+	OK_(crypt_init(&cd, DMDIR L_DEVICE_OK));
+	OK_(crypt_wipe(cd, NULL, CRYPT_WIPE_ZERO, 0, 1*1024*1024, 1*1024*1024, 0, NULL, NULL));
+	OK_(crypt_header_restore(cd, CRYPT_LUKS2, NO_REQS_LUKS2_HEADER));
+	/* check LUKS2 specific API call returns non-error code */
+	OK_(crypt_persistent_flags_get(cd, CRYPT_FLAGS_REQUIREMENTS, &flags));
+	EQ_(flags, 0);
+	/* same test, any LUKS */
+	OK_(crypt_wipe(cd, NULL, CRYPT_WIPE_ZERO, 0, 1*1024*1024, 1*1024*1024, 0, NULL, NULL));
+	OK_(crypt_header_restore(cd, CRYPT_LUKS, NO_REQS_LUKS2_HEADER));
+	/* check LUKS2 specific API call returns non-error code */
+	OK_(crypt_persistent_flags_get(cd, CRYPT_FLAGS_REQUIREMENTS, &flags));
+	EQ_(flags, 0);
+
 	crypt_free(cd);
 
 	_cleanup_dmdevices();
@@ -2254,9 +2269,8 @@ static void Pbkdf(void)
 	bad.type = NULL;
 	bad.hash = DEFAULT_LUKS1_HASH;
 	FAIL_(crypt_set_pbkdf_type(cd, &bad), "Pbkdf type member is empty");
-	// following test fails atm
-	// bad.hash = "hamster_hash";
-	// FAIL_(crypt_set_pbkdf_type(cd, &pbkdf2), "Unknown hash member");
+	bad.hash = "hamster_hash";
+	FAIL_(crypt_set_pbkdf_type(cd, &pbkdf2), "Unknown hash member");
 	crypt_free(cd);
 	// test whether crypt_get_pbkdf_type() behaves accordingly after second crypt_load() call
 	OK_(crypt_init(&cd, DEVICE_1));
@@ -2974,23 +2988,23 @@ int main(int argc, char *argv[])
 	crypt_set_debug_level(_debug ? CRYPT_DEBUG_ALL : CRYPT_DEBUG_NONE);
 
 	RUN_(AddDeviceLuks2, "Format and use LUKS2 device");
-	RUN_(Luks2HeaderLoad, "test header load");
-	RUN_(Luks2HeaderRestore, "test LUKS2 header restore");
-	RUN_(Luks2HeaderBackup, "test LUKS2 header backup");
-	RUN_(ResizeDeviceLuks2, "Luks device resize tests");
+	RUN_(Luks2HeaderLoad, "LUKS2 header load");
+	RUN_(Luks2HeaderRestore, "LUKS2 header restore");
+	RUN_(Luks2HeaderBackup, "LUKS2 header backup");
+	RUN_(ResizeDeviceLuks2, "LUKS2 device resize tests");
 	RUN_(UseLuks2Device, "Use pre-formated LUKS2 device");
-	RUN_(SuspendDevice, "Suspend/Resume test");
+	RUN_(SuspendDevice, "LUKS2 Suspend/Resume");
 	RUN_(UseTempVolumes, "Format and use temporary encrypted device");
-	RUN_(Tokens, "General tokens API tests");
-	RUN_(TokenActivationByKeyring, "Builtin kernel keyring token tests");
-	RUN_(LuksConvert, "Test LUKS1 <-> LUKS2 conversions");
-	RUN_(Pbkdf, "Exercice default pbkdf manipulation routines");
-	RUN_(Luks2KeyslotAdd, "Add new keyslot by unused key");
-	RUN_(Luks2ActivateByKeyring, "Test LUKS2 activation by passphrase in keyring");
-	RUN_(Luks2Requirements, "Test LUKS2 requirements flags");
-	RUN_(Luks2Integrity, "Test LUKS2 with data integrity");
-	RUN_(Luks2Flags, "Test LUKS2 persistent flags");
-	RUN_(Luks2Repair, "Test LUKS2 repair"); // test disables metadata locking. Run alwas last!
+	RUN_(Tokens, "General tokens API");
+	RUN_(TokenActivationByKeyring, "Builtin kernel keyring token");
+	RUN_(LuksConvert, "LUKS1 <-> LUKS2 conversions");
+	RUN_(Pbkdf, "Default PBKDF manipulation routines");
+	RUN_(Luks2KeyslotAdd, "Add a new keyslot by unused key");
+	RUN_(Luks2ActivateByKeyring, "LUKS2 activation by passphrase in keyring");
+	RUN_(Luks2Requirements, "LUKS2 requirements flags");
+	RUN_(Luks2Integrity, "LUKS2 with data integrity");
+	RUN_(Luks2Flags, "LUKS2 persistent flags");
+	RUN_(Luks2Repair, "LUKS2 repair"); // test disables metadata locking. Run always last!
 out:
 	_cleanup();
 	return 0;

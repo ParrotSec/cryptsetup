@@ -71,7 +71,7 @@ int VERITY_read_sb(struct crypt_device *cd,
 		return -EINVAL;
 	}
 
-	if (sb_offset % 512) {
+	if (MISALIGNED_512(sb_offset)) {
 		log_err(cd, _("Unsupported VERITY hash offset."));
 		return -EINVAL;
 	}
@@ -201,6 +201,8 @@ int VERITY_write_sb(struct crypt_device *cd,
 	if (r)
 		log_err(cd, _("Error during update of verity header on device %s."),
 			device_path(device));
+
+	device_sync(device, devfd);
 	close(devfd);
 
 	return r;

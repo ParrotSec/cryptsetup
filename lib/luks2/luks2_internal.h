@@ -58,7 +58,7 @@ json_object *LUKS2_get_tokens_jobj(struct luks2_hdr *hdr);
 void hexprint_base64(struct crypt_device *cd, json_object *jobj,
 		     const char *sep, const char *line_sep);
 
-json_object *parse_json_len(const char *json_area, int length, int *end_offset);
+json_object *parse_json_len(const char *json_area, uint64_t max_length, int *json_len);
 uint64_t json_object_get_uint64(json_object *jobj);
 uint32_t json_object_get_uint32(json_object *jobj);
 json_object *json_object_new_uint64(uint64_t value);
@@ -73,7 +73,7 @@ void JSON_DBG(json_object *jobj, const char *desc);
 json_object *json_contains(json_object *jobj, const char *name, const char *section,
 		      const char *key, json_type type);
 
-int LUKS2_hdr_validate(json_object *hdr_jobj);
+int LUKS2_hdr_validate(json_object *hdr_jobj, uint64_t json_size);
 int LUKS2_keyslot_validate(json_object *hdr_jobj, json_object *hdr_keyslot, const char *key);
 int LUKS2_check_json_size(const struct luks2_hdr *hdr);
 int LUKS2_token_validate(json_object *hdr_jobj, json_object *jobj_token, const char *key);

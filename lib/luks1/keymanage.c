@@ -378,8 +378,10 @@ int LUKS_hdr_restore(
 	/* Be sure to reload new data */
 	r = LUKS_read_phdr(hdr, 1, 0, ctx);
 out:
-	if (devfd >= 0)
+	if (devfd >= 0) {
+		device_sync(device, devfd);
 		close(devfd);
+	}
 	crypt_safe_free(buffer);
 	return r;
 }
@@ -681,6 +683,8 @@ int LUKS_write_phdr(struct luks_phdr *hdr,
 			    &convHdr, hdr_size) < hdr_size ? -EIO : 0;
 	if (r)
 		log_err(ctx, _("Error during update of LUKS header on device %s."), device_path(device));
+
+	device_sync(device, devfd);
 	close(devfd);
 
 	/* Re-read header from disk to be sure that in-memory and on-disk data are the same. */
@@ -1204,5 +1208,58 @@ int LUKS1_activate(struct crypt_device *cd,
 	r = dm_create_device(cd, name, CRYPT_LUKS1, &dmd, 0);
 
 	free(dm_cipher);
+	return r;
+}
+
+int LUKS_wipe_header_areas(struct luks_phdr *hdr,
+	struct crypt_device *ctx)
+{
+	int i, r;
+	uint64_t offset, length;
+	size_t wipe_block;
+
+	/* Wipe complete header, keyslots and padding areas with zeroes. */
+	offset = 0;
+	length = (uint64_t)hdr->payloadOffset * SECTOR_SIZE;
+	wipe_block = 1024 * 1024;
+
+	/* On detached header or bogus header, wipe at least the first 4k */
+	if (length == 0 || length > (LUKS_MAX_KEYSLOT_SIZE * LUKS_NUMKEYS)) {
+		length = 4096;
+		wipe_block = 4096;
+	}
+
+	log_dbg("Wiping LUKS areas (0x%06" PRIx64 " - 0x%06" PRIx64") with zeroes.",
+		offset, length + offset);
+
+	r = crypt_wipe_device(ctx, crypt_metadata_device(ctx), CRYPT_WIPE_ZERO,
+			      offset, length, wipe_block, NULL, NULL);
+	if (r < 0)
+		return r;
+
+	/* Wipe keyslots areas */
+	wipe_block = 1024 * 1024;
+	for (i = 0; i < LUKS_NUMKEYS; i++) {
+		r = LUKS_keyslot_area(hdr, i, &offset, &length);
+		if (r < 0)
+			return r;
+
+		/* Ignore too big LUKS1 keyslots here */
+		if (length > LUKS_MAX_KEYSLOT_SIZE ||
+		    offset > (LUKS_MAX_KEYSLOT_SIZE - length))
+			continue;
+
+		if (length == 0 || offset < 4096)
+			return -EINVAL;
+
+		log_dbg("Wiping keyslot %i area (0x%06" PRIx64 " - 0x%06" PRIx64") with random data.",
+			i, offset, length + offset);
+
+		r = crypt_wipe_device(ctx, crypt_metadata_device(ctx), CRYPT_WIPE_RANDOM,
+				offset, length, wipe_block, NULL, NULL);
+		if (r < 0)
+			return r;
+	}
+
 	return r;
 }

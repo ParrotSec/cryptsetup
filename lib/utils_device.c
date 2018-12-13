@@ -190,6 +190,12 @@ static int device_ready(struct device *device)
 		r = -EINVAL;
 	else if (!S_ISBLK(st.st_mode))
 		r = S_ISREG(st.st_mode) ? -ENOTBLK : -EINVAL;
+	if (r == -EINVAL) {
+		log_err(NULL, _("Device %s is not compatible."),
+			device_path(device));
+		close(devfd);
+		return r;
+	}
 
 	/* Allow only increase (loop device) */
 	tmp_size = device_alignment_fd(devfd);
@@ -230,6 +236,16 @@ static int _open_locked(struct device *device, int flags)
 }
 
 /*
+ * Common wrapper for device sync.
+ * FIXME: file descriptor will be in struct later.
+ */
+void device_sync(struct device *device, int devfd)
+{
+	if (fsync(devfd) == -1)
+		log_dbg("Cannot sync device %s.", device_path(device));
+}
+
+/*
  * in non-locked mode returns always fd or -1
  *
  * in locked mode:
@@ -242,7 +258,6 @@ static int device_open_internal(struct device *device, int flags)
 {
 	int devfd;
 
-	flags |= O_SYNC;
 	if (device->o_direct)
 		flags |= O_DIRECT;
 
@@ -561,7 +576,7 @@ static int device_info(struct crypt_device *cd,
 	}
 
 	if (fd == -1) {
-		r = -EINVAL;
+		r = errno ? -errno : -EINVAL;
 		goto out;
 	}
 
@@ -597,13 +612,14 @@ out:
 		break;
 	case -EBUSY:
 		log_err(cd, _("Cannot use device %s which is in use "
-			      "(already mapped or mounted)."), device->path);
+			      "(already mapped or mounted)."), device_path(device));
 		break;
 	case -EACCES:
-		log_err(cd, _("Cannot use device %s, permission denied."), device->path);
+		log_err(cd, _("Cannot use device %s, permission denied."), device_path(device));
 		break;
 	default:
-		log_err(cd, _("Cannot get info about device %s."), device->path);
+		log_err(cd, _("Cannot get info about device %s."), device_path(device));
+		r = -EINVAL;
 	}
 
 	return r;
@@ -682,14 +698,14 @@ int device_block_adjust(struct crypt_device *cd,
 
 	if (device_offset >= real_size) {
 		log_err(cd, _("Requested offset is beyond real size of device %s."),
-			device->path);
+			device_path(device));
 		return -EINVAL;
 	}
 
 	if (size && !*size) {
 		*size = real_size;
 		if (!*size) {
-			log_err(cd, _("Device %s has zero size."), device->path);
+			log_err(cd, _("Device %s has zero size."), device_path(device));
 			return -ENOTBLK;
 		}
 		*size -= device_offset;
@@ -700,7 +716,7 @@ int device_block_adjust(struct crypt_device *cd,
 		log_dbg("Device %s: offset = %" PRIu64 " requested size = %" PRIu64
 			", backing device size = %" PRIu64,
 			device->path, device_offset, *size, real_size);
-		log_err(cd, _("Device %s is too small."), device->path);
+		log_err(cd, _("Device %s is too small."), device_path(device));
 		return -EINVAL;
 	}
 
