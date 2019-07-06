@@ -5,9 +5,9 @@ Source: https://gitlab.com/cryptsetup/cryptsetup
 Files: *
 Copyright: © 2004      Christophe Saout <christophe@saout.de>
            © 2004-2008 Clemens Fruhwirth <clemens@endorphin.org>
-           © 2008-2018 Red Hat, Inc.
-           © 2008-2018 Milan Broz <gmazyland@gmail.com>
-License: GPL-2+
+           © 2008-2019 Red Hat, Inc.
+           © 2008-2019 Milan Broz <gmazyland@gmail.com>
+License: GPL-2+ with OpenSSL exception
 
 Files: debian/*
 Copyright: © 2004-2005 Wesley W. Terpstra <terpstra@debian.org>
@@ -45,17 +45,22 @@ Copyright: © 2005-2015 Jonas Meurer <jonas@freesources.org>
 License: GPL-2+
 
 Files: docs/examples/*
-Copyright: © 2011-2018 Red Hat, Inc.
+Copyright: © 2011-2019 Red Hat, Inc.
 License: LGPL-2.1+
 
 Files: lib/base64.c
 Copyright: © 1999-2001, 2004-2006, 2009-2018 Free Software Foundation, Inc.
 License: GPL-2+
 
-Files: lib/crypto_backend/* lib/loopaes/* lib/tcrypt/* lib/verity/* python/*
-Copyright: © 2009-2018 Red Hat, Inc.
-           © 2010-2018 Milan Broz <gmazyland@gmail.com>
+Files: lib/crypto_backend/* lib/loopaes/* lib/tcrypt/* lib/verity/*
+Copyright: © 2009-2019 Red Hat, Inc.
+           © 2010-2019 Milan Broz <gmazyland@gmail.com>
 License: LGPL-2.1+
+
+Files: lib/crypto_backend/crypto_openssl.c
+Copyright: © 2009-2019 Red Hat, Inc.
+           © 2010-2019 Milan Broz <gmazyland@gmail.com>
+License: LGPL-2.1+ with OpenSSL exception
 
 Files: lib/crypto_backend/argon2/*
 Copyright: © 2015 Daniel Dinu
@@ -94,6 +99,36 @@ License: GPL-2+
  On Debian systems, the complete text of the GNU General Public
  License v2 can be found in `/usr/share/common-licenses/GPL-2'.
 
+License: GPL-2+ with OpenSSL exception
+ This package is free software; you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation; either version 2 of the License, or
+ (at your option) any later version.
+ .
+ This package is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+ .
+ You should have received a copy of the GNU General Public License
+ along with this package; if not, write to the Free Software
+ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
+ .
+ On Debian systems, the complete text of the GNU General Public
+ License v2 can be found in `/usr/share/common-licenses/GPL-2'.
+ .
+ In addition, as a special exception, the copyright holders give
+ permission to link the code of portions of this program with the
+ OpenSSL library under certain conditions as described in each
+ individual source file, and distribute linked combinations including
+ the two.  You must obey the GNU General Public License in all respects
+ for all of the code used other than OpenSSL.  If you modify file(s)
+ with this exception, you may extend this exception to your version of
+ the file(s), but you are not obligated to do so.  If you do not wish to
+ do so, delete this exception statement from your version.  If you
+ delete this exception statement from all source files in the program,
+ then also delete it here.
+
 License: LGPL-2.1+
  This package is free software; you can redistribute it and/or modify it
  under the terms of the GNU Lesser General Public License as published
@@ -112,6 +147,37 @@ License: LGPL-2.1+
  .
  On Debian systems, the complete text of the GNU Lesser General Public
  License v2.1 can be found in `/usr/share/common-licenses/LGPL-2.1'.
+
+License: LGPL-2.1+ with OpenSSL exception
+ This package is free software; you can redistribute it and/or modify it
+ under the terms of the GNU Lesser General Public License as published
+ by the Free Software Foundation; either version 2.1 of the License, or
+ (at your option) any later version.
+ .
+ This package is distributed in the hope that it will be useful, but
+ WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ Lesser General Public License for more details.
+ .
+ You should have received a copy of the GNU Lesser General Public
+ License along with this package; if not, write to the Free Software
+ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+ 02110-1301 USA.
+ .
+ On Debian systems, the complete text of the GNU Lesser General Public
+ License v2.1 can be found in `/usr/share/common-licenses/LGPL-2.1'.
+ .
+ In addition, as a special exception, the copyright holders give
+ permission to link the code of portions of this program with the
+ OpenSSL library under certain conditions as described in each
+ individual source file, and distribute linked combinations including
+ the two.  You must obey the GNU Lesser General Public License in all
+ respects for all of the code used other than OpenSSL.  If you modify
+ file(s) with this exception, you may extend this exception to your
+ version of the file(s), but you are not obligated to do so.  If you do
+ not wish to do so, delete this exception statement from your version.
+ If you delete this exception statement from all source files in the
+ program, then also delete it here.
 
 License: CC0
  You may use this work under the terms of a Creative Commons CC0 1.0

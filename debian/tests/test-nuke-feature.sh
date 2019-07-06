@@ -5,7 +5,7 @@ set -e
 cd ${AUTOPKGTEST_TMP:-/tmp}
 
 echo ">> Setup the 'cryptedfs' file that will contain the luks container"
-dd if=/dev/zero of=cryptedfs count=1 bs=10M
+dd if=/dev/zero of=cryptedfs count=1 bs=20M
 echo -n "this the passphrase" >keyfile-default
 echo -n "nuke it interactive" >keyfile-nuke-interactive
 echo -n "nuke it keyfile" >keyfile-nuke-noninteractive

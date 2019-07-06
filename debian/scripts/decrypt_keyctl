@@ -19,67 +19,37 @@ die()
     exit 1
 }
 
-# the keyfile given from crypttab is used as identifier in the keyring
-# including the prefix "cryptkey-"
-ID_="cryptkey-$1"
+if [ -z "${CRYPTTAB_KEY:-}" ] || [ "$CRYPTTAB_KEY" = "none" ]; then
+    # store the passphrase in the key name used by systemd-ask-password
+    ID_="cryptsetup"
+else
+    # the keyfile given from crypttab is used as identifier in the keyring
+    # including the prefix "cryptsetup:"
+    ID_="cryptsetup:$CRYPTTAB_KEY"
+fi
 TIMEOUT_='60'
 ASKPASS_='/lib/cryptsetup/askpass'
-STTY_='/bin/stty'
-PW_READER_='undefined'
 PROMPT_="Caching passphrase for ${CRYPTTAB_NAME}: "
 
-test -x "$STTY_" && PW_READER_='stty'           # 1. backup method
-test -x "$ASKPASS_" && PW_READER_='askpass'     # prefered method
 
-KID_=$(keyctl search @u user "$ID_" 2>/dev/null)
-if [ $? -ne 0 ] || [ -z "$KID_" ] || [ "$CRYPTTAB_TRIED" -gt 0 ]; then
+if ! KID_="$(keyctl search @u user "$ID_" 2>/dev/null)" || \
+        [ -z "$KID_" ] || [ "$CRYPTTAB_TRIED" -gt 0 ]; then
     # key not found or wrong, ask the user
-    case "$PW_READER_" in
-        askpass)
-            KEY_="$($ASKPASS_ "$PROMPT_")" || die "Error executing $ASKPASS_"
-            ;;
-        stty) # disable echoing with stty
-            $STTY_ -echo
-            if ! read -r KEY_; then
-                $STTY_ echo
-                die "Error reading key from /dev/stdin"
-            else
-                $STTY_ echo
-                echo >&2
-            fi
-            ;;
-        *)  # first try to read the posix way, then at least give the user a chance
-            printf '%s' "$PROMPT_" >&2
-            if ! read -res KEY_; then
-                echo
-                echo "ERROR: Can not disable echoing, YOUR PASSWORD WILL BE VISIBLE!" >&2
-                echo "This can be fixed if you add either $ASKPASS_" >&2
-                echo "or $STTY_ to your initramfs" >&2
-                printf '%s' "$PROMPT_" >&2
-                if ! read -r KEY_; then
-                    die "Error reading key from /dev/stdin"
-                else
-                    echo >&2
-                fi
-            else
-                echo >&2
-            fi
-            ;;
-    esac
+    KEY_="$($ASKPASS_ "$PROMPT_")" || die "Error executing $ASKPASS_"
     if [ -n "$KID_" ]; then
         # I have cached wrong password and now i may use either `keyctl update`
         # to update $KID_ or just unlink old key, and add new. With `update` i
         # may hit "Key has expired", though. So i'll go "unlink and add" way.
-        keyctl unlink $KID_ @u
+        keyctl unlink "$KID_" @u
         KID_=""
     fi
-    KID_=$(printf '%s' "$KEY_" | keyctl padd user "$ID_" @u)
-    [ -z "$KID_" ] && die "Error adding passphrase to kernel keyring"
-    if ! keyctl timeout $KID_ $TIMEOUT_; then
-        keyctl unlink $KID_ @u
+    KID_="$(printf "%s" "$KEY_" | keyctl padd user "$ID_" @u)"
+    [ -n "$KID_" ] || die "Error adding passphrase to kernel keyring"
+    if ! keyctl timeout "$KID_" "$TIMEOUT_"; then
+        keyctl unlink "$KID_" @u
         die "Error setting timeout on key ($KID_), removing"
     fi
 else
     echo "Using cached passphrase for ${CRYPTTAB_NAME}." >&2
 fi
-keyctl pipe $KID_
+keyctl pipe "$KID_"

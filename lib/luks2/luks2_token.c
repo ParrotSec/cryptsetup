@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2, token handling
  *
- * Copyright (C) 2016-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2016-2018, Milan Broz. All rights reserved.
+ * Copyright (C) 2016-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -45,21 +45,19 @@ int crypt_token_register(const crypt_token_handler *handler)
 	int i;
 
 	if (is_builtin_candidate(handler->name)) {
-		log_dbg("'" LUKS2_BUILTIN_TOKEN_PREFIX "' is reserved prefix for builtin tokens.");
+		log_dbg(NULL, "'" LUKS2_BUILTIN_TOKEN_PREFIX "' is reserved prefix for builtin tokens.");
 		return -EINVAL;
 	}
 
 	for (i = 0; i < LUKS2_TOKENS_MAX && token_handlers[i].h; i++) {
 		if (!strcmp(token_handlers[i].h->name, handler->name)) {
-			log_dbg("Keyslot handler %s is already registered.", handler->name);
+			log_dbg(NULL, "Keyslot handler %s is already registered.", handler->name);
 			return -EINVAL;
 		}
 	}
 
-	if (i == LUKS2_TOKENS_MAX) {
-		log_dbg("No more space for another token handler.");
+	if (i == LUKS2_TOKENS_MAX)
 		return -EINVAL;
-	}
 
 	token_handlers[i].h = handler;
 	return 0;
@@ -149,21 +147,20 @@ int LUKS2_token_create(struct crypt_device *cd,
 	if (!json_object_object_get_ex(hdr->jobj, "tokens", &jobj_tokens))
 		return -EINVAL;
 
+	snprintf(num, sizeof(num), "%d", token);
+
 	/* Remove token */
-	if (!json) {
-		snprintf(num, sizeof(num), "%d", token);
+	if (!json)
 		json_object_object_del(jobj_tokens, num);
-	} else {
+	else {
 
 		jobj = json_tokener_parse_verbose(json, &jerr);
 		if (!jobj) {
-			log_dbg("Token JSON parse failed.");
+			log_dbg(cd, "Token JSON parse failed.");
 			return -EINVAL;
 		}
 
-		snprintf(num, sizeof(num), "%d", token);
-
-		if (LUKS2_token_validate(hdr->jobj, jobj, num)) {
+		if (LUKS2_token_validate(cd, hdr->jobj, jobj, num)) {
 			json_object_put(jobj);
 			return -EINVAL;
 		}
@@ -172,7 +169,7 @@ int LUKS2_token_create(struct crypt_device *cd,
 		if (is_builtin_candidate(json_object_get_string(jobj_type))) {
 			th = LUKS2_token_handler_type_internal(cd, json_object_get_string(jobj_type));
 			if (!th || !th->set) {
-				log_dbg("%s is builtin token candidate with missing handler", json_object_get_string(jobj_type));
+				log_dbg(cd, "%s is builtin token candidate with missing handler", json_object_get_string(jobj_type));
 				json_object_put(jobj);
 				return -EINVAL;
 			}
@@ -182,13 +179,13 @@ int LUKS2_token_create(struct crypt_device *cd,
 
 		if (h && h->validate && h->validate(cd, json)) {
 			json_object_put(jobj);
-			log_dbg("Token type %s validation failed.", h->name);
+			log_dbg(cd, "Token type %s validation failed.", h->name);
 			return -EINVAL;
 		}
 
 		json_object_object_add(jobj_tokens, num, jobj);
-		if (LUKS2_check_json_size(hdr)) {
-			log_dbg("Not enough space in header json area for new token.");
+		if (LUKS2_check_json_size(cd, hdr)) {
+			log_dbg(cd, "Not enough space in header json area for new token.");
 			json_object_object_del(jobj_tokens, num);
 			return -ENOSPC;
 		}
@@ -252,7 +249,6 @@ int LUKS2_builtin_token_create(struct crypt_device *cd,
 	int commit)
 {
 	const token_handler *th;
-	char num[16];
 	int r;
 	json_object *jobj_token, *jobj_tokens;
 
@@ -267,7 +263,6 @@ int LUKS2_builtin_token_create(struct crypt_device *cd,
 	}
 	if (token < 0 || token >= LUKS2_TOKENS_MAX)
 		return -EINVAL;
-	snprintf(num, sizeof(num), "%u", token);
 
 	r = th->set(&jobj_token, params);
 	if (r) {
@@ -276,17 +271,17 @@ int LUKS2_builtin_token_create(struct crypt_device *cd,
 	}
 
 	// builtin tokens must produce valid json
-	r = LUKS2_token_validate(hdr->jobj, jobj_token, "new");
+	r = LUKS2_token_validate(cd, hdr->jobj, jobj_token, "new");
 	assert(!r);
 	r = th->h->validate(cd, json_object_to_json_string_ext(jobj_token,
 		JSON_C_TO_STRING_PLAIN | JSON_C_TO_STRING_NOSLASHESCAPE));
 	assert(!r);
 
 	json_object_object_get_ex(hdr->jobj, "tokens", &jobj_tokens);
-	json_object_object_add(jobj_tokens, num, jobj_token);
-	if (LUKS2_check_json_size(hdr)) {
-		log_dbg("Not enough space in header json area for new %s token.", type);
-		json_object_object_del(jobj_tokens, num);
+	json_object_object_add_by_uint(jobj_tokens, token, jobj_token);
+	if (LUKS2_check_json_size(cd, hdr)) {
+		log_dbg(cd, "Not enough space in header json area for new %s token.", type);
+		json_object_object_del_by_uint(jobj_tokens, token);
 		return -ENOSPC;
 	}
 
@@ -315,14 +310,14 @@ static int LUKS2_token_open(struct crypt_device *cd,
 			return -EINVAL;
 
 		if (h->validate(cd, json)) {
-			log_dbg("Token %d (%s) validation failed.", token, h->name);
+			log_dbg(cd, "Token %d (%s) validation failed.", token, h->name);
 			return -EINVAL;
 		}
 	}
 
 	r = h->open(cd, token, buffer, buffer_len, usrptr);
 	if (r < 0)
-		log_dbg("Token %d (%s) open failed with %d.", token, h->name, r);
+		log_dbg(cd, "Token %d (%s) open failed with %d.", token, h->name, r);
 
 	return r;
 }
@@ -371,7 +366,7 @@ static int LUKS2_keyslot_open_by_token(struct crypt_device *cd,
 	for (i = 0; i < (int) json_object_array_length(jobj_token_keyslots) && r < 0; i++) {
 		jobj = json_object_array_get_idx(jobj_token_keyslots, i);
 		num = json_object_get_string(jobj);
-		log_dbg("Trying to open keyslot %s with token %d (type %s).", num, token, h->name);
+		log_dbg(cd, "Trying to open keyslot %s with token %d (type %s).", num, token, h->name);
 		r = LUKS2_keyslot_open(cd, atoi(num), segment, buffer, buffer_len, vk);
 	}
 
@@ -501,7 +496,7 @@ static int assign_one_keyslot(struct crypt_device *cd, struct luks2_hdr *hdr,
 	json_object *jobj1, *jobj_token, *jobj_token_keyslots;
 	char num[16];
 
-	log_dbg("Keyslot %i %s token %i.", keyslot, assign ? "assigned to" : "unassigned from", token);
+	log_dbg(cd, "Keyslot %i %s token %i.", keyslot, assign ? "assigned to" : "unassigned from", token);
 
 	jobj_token = LUKS2_get_token_jobj(hdr, token);
 	if (!jobj_token)

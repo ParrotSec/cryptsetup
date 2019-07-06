@@ -1,9 +1,9 @@
 /*
  * LUKS - Linux Unified Key Setup
  *
- * Copyright (C) 2004-2006, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2018, Milan Broz
+ * Copyright (C) 2004-2006 Clemens Fruhwirth <clemens@endorphin.org>
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -58,25 +58,15 @@ static int LUKS_endec_template(char *src, size_t srcLength,
 	char name[PATH_MAX], path[PATH_MAX];
 	char cipher_spec[MAX_CIPHER_LEN * 3];
 	struct crypt_dm_active_device dmd = {
-		.target = DM_CRYPT,
-		.uuid   = NULL,
-		.flags  = CRYPT_ACTIVATE_PRIVATE,
-		.data_device = crypt_metadata_device(ctx),
-		.u.crypt = {
-			.cipher = cipher_spec,
-			.vk     = vk,
-			.offset = sector,
-			.iv_offset = 0,
-			.sector_size = SECTOR_SIZE,
-		}
+		.flags = CRYPT_ACTIVATE_PRIVATE,
 	};
 	int r, devfd = -1;
 	size_t bsize, keyslot_alignment, alignment;
 
-	log_dbg("Using dmcrypt to access keyslot area.");
+	log_dbg(ctx, "Using dmcrypt to access keyslot area.");
 
-	bsize = device_block_size(dmd.data_device);
-	alignment = device_alignment(dmd.data_device);
+	bsize = device_block_size(ctx, crypt_metadata_device(ctx));
+	alignment = device_alignment(crypt_metadata_device(ctx));
 	if (!bsize || !alignment)
 		return -EINVAL;
 
@@ -96,26 +86,33 @@ static int LUKS_endec_template(char *src, size_t srcLength,
 	if (snprintf(cipher_spec, sizeof(cipher_spec), "%s-%s", cipher, cipher_mode) < 0)
 		return -ENOMEM;
 
-	r = device_block_adjust(ctx, dmd.data_device, DEV_OK,
-				dmd.u.crypt.offset, &dmd.size, &dmd.flags);
+	r = device_block_adjust(ctx, crypt_metadata_device(ctx), DEV_OK,
+				sector, &dmd.size, &dmd.flags);
 	if (r < 0) {
 		log_err(ctx, _("Device %s doesn't exist or access denied."),
-			device_path(dmd.data_device));
+			device_path(crypt_metadata_device(ctx)));
 		return -EIO;
 	}
 
 	if (mode != O_RDONLY && dmd.flags & CRYPT_ACTIVATE_READONLY) {
 		log_err(ctx, _("Cannot write to device %s, permission denied."),
-			device_path(dmd.data_device));
+			device_path(crypt_metadata_device(ctx)));
 		return -EACCES;
 	}
 
-	r = dm_create_device(ctx, name, "TEMP", &dmd, 0);
+	r = dm_crypt_target_set(&dmd.segment, 0, dmd.size,
+			crypt_metadata_device(ctx), vk, cipher_spec, 0, sector,
+			NULL, 0, SECTOR_SIZE);
+	if (r)
+		goto out;
+
+	r = dm_create_device(ctx, name, "TEMP", &dmd);
 	if (r < 0) {
 		if (r != -EACCES && r != -ENOTSUP)
-			_error_hint(ctx, device_path(dmd.data_device),
+			_error_hint(ctx, device_path(crypt_metadata_device(ctx)),
 				    cipher, cipher_mode, vk->keylength * 8);
-		return -EIO;
+		r = -EIO;
+		goto out;
 	}
 
 	devfd = open(path, mode | O_DIRECT | O_SYNC);
@@ -132,6 +129,7 @@ static int LUKS_endec_template(char *src, size_t srcLength,
 	} else
 		r = 0;
  out:
+	dm_targets_free(ctx, &dmd);
 	if (devfd != -1)
 		close(devfd);
 	dm_remove_device(ctx, name, CRYPT_DEACTIVATE_FORCE);
@@ -158,7 +156,7 @@ int LUKS_encrypt_to_storage(char *src, size_t srcLength,
 	r = crypt_storage_init(&s, 0, cipher, cipher_mode, vk->key, vk->keylength);
 
 	if (r)
-		log_dbg("Userspace crypto wrapper cannot use %s-%s (%d).",
+		log_dbg(ctx, "Userspace crypto wrapper cannot use %s-%s (%d).",
 			cipher, cipher_mode, r);
 
 	/* Fallback to old temporary dmcrypt device */
@@ -172,7 +170,7 @@ int LUKS_encrypt_to_storage(char *src, size_t srcLength,
 		return r;
 	}
 
-	log_dbg("Using userspace crypto wrapper to access keyslot area.");
+	log_dbg(ctx, "Using userspace crypto wrapper to access keyslot area.");
 
 	r = crypt_storage_encrypt(s, 0, srcLength / SECTOR_SIZE, src);
 	crypt_storage_destroy(s);
@@ -183,11 +181,11 @@ int LUKS_encrypt_to_storage(char *src, size_t srcLength,
 	r = -EIO;
 
 	/* Write buffer to device */
-	devfd = device_open(device, O_RDWR);
+	devfd = device_open(ctx, device, O_RDWR);
 	if (devfd < 0)
 		goto out;
 
-	if (write_lseek_blockwise(devfd, device_block_size(device),
+	if (write_lseek_blockwise(devfd, device_block_size(ctx, device),
 				  device_alignment(device), src, srcLength,
 				  sector * SECTOR_SIZE) < 0)
 		goto out;
@@ -195,7 +193,7 @@ int LUKS_encrypt_to_storage(char *src, size_t srcLength,
 	r = 0;
 out:
 	if (devfd >= 0) {
-		device_sync(device, devfd);
+		device_sync(ctx, device, devfd);
 		close(devfd);
 	}
 	if (r)
@@ -223,7 +221,7 @@ int LUKS_decrypt_from_storage(char *dst, size_t dstLength,
 	r = crypt_storage_init(&s, 0, cipher, cipher_mode, vk->key, vk->keylength);
 
 	if (r)
-		log_dbg("Userspace crypto wrapper cannot use %s-%s (%d).",
+		log_dbg(ctx, "Userspace crypto wrapper cannot use %s-%s (%d).",
 			cipher, cipher_mode, r);
 
 	/* Fallback to old temporary dmcrypt device */
@@ -237,17 +235,17 @@ int LUKS_decrypt_from_storage(char *dst, size_t dstLength,
 		return r;
 	}
 
-	log_dbg("Using userspace crypto wrapper to access keyslot area.");
+	log_dbg(ctx, "Using userspace crypto wrapper to access keyslot area.");
 
 	/* Read buffer from device */
-	devfd = device_open(device, O_RDONLY);
+	devfd = device_open(ctx, device, O_RDONLY);
 	if (devfd < 0) {
 		log_err(ctx, _("Cannot open device %s."), device_path(device));
 		crypt_storage_destroy(s);
 		return -EIO;
 	}
 
-	if (read_lseek_blockwise(devfd, device_block_size(device),
+	if (read_lseek_blockwise(devfd, device_block_size(ctx, device),
 				 device_alignment(device), dst, dstLength,
 				 sector * SECTOR_SIZE) < 0) {
 		if (!fstat(devfd, &st) && (st.st_size < (off_t)dstLength))

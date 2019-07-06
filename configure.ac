@@ -1,9 +1,9 @@
 AC_PREREQ([2.67])
-AC_INIT([cryptsetup],[2.0.6])
+AC_INIT([cryptsetup],[2.1.0])
 
 dnl library version from <major>.<minor>.<release>[-<suffix>]
 LIBCRYPTSETUP_VERSION=$(echo $PACKAGE_VERSION | cut -f1 -d-)
-LIBCRYPTSETUP_VERSION_INFO=15:0:3
+LIBCRYPTSETUP_VERSION_INFO=16:0:4
 
 AM_SILENT_RULES([yes])
 AC_CONFIG_SRCDIR(src/cryptsetup.c)
@@ -185,8 +185,12 @@ AC_DEFUN([CONFIGURE_GCRYPT], [
 	else
 		GCRYPT_REQ_VERSION=1.1.42
 	fi
-	dnl Check if we can use gcrypt PBKDF2 (1.6.0 supports empty password)
+
+	dnl libgcrypt rejects to use pkgconfig, use AM_PATH_LIBGCRYPT from gcrypt-devel here.
+	dnl Do not require gcrypt-devel if other crypto backend is used.
+	m4_ifdef([AM_PATH_LIBGCRYPT],[
 	AC_ARG_ENABLE([gcrypt-pbkdf2],
+		dnl Check if we can use gcrypt PBKDF2 (1.6.0 supports empty password)
 		AS_HELP_STRING([--enable-gcrypt-pbkdf2], [force enable internal gcrypt PBKDF2]),
 		if test "x$enableval" = "xyes"; then
 			[use_internal_pbkdf2=0]
@@ -194,7 +198,8 @@ AC_DEFUN([CONFIGURE_GCRYPT], [
 			[use_internal_pbkdf2=1]
 		fi,
 		[AM_PATH_LIBGCRYPT([1.6.1], [use_internal_pbkdf2=0], [use_internal_pbkdf2=1])])
-	AM_PATH_LIBGCRYPT($GCRYPT_REQ_VERSION,,[AC_MSG_ERROR([You need the gcrypt library.])])
+	AM_PATH_LIBGCRYPT($GCRYPT_REQ_VERSION,,[AC_MSG_ERROR([You need the gcrypt library.])])],
+	AC_MSG_ERROR([Missing support for gcrypt: install gcrypt and regenerate configure.]))
 
 	AC_MSG_CHECKING([if internal cryptsetup PBKDF2 is compiled-in])
 	if test $use_internal_pbkdf2 = 0; then
@@ -271,6 +276,7 @@ AC_DEFUN([CONFIGURE_KERNEL], [
 AC_DEFUN([CONFIGURE_NETTLE], [
 	AC_CHECK_HEADERS(nettle/sha.h,,
 		[AC_MSG_ERROR([You need Nettle cryptographic library.])])
+	AC_CHECK_HEADERS(nettle/version.h)
 
 	saved_LIBS=$LIBS
 	AC_CHECK_LIB(nettle, nettle_pbkdf2_hmac_sha256,,
@@ -352,11 +358,12 @@ LIBS=$saved_LIBS
 
 dnl Check for JSON-C used in LUKS2
 PKG_CHECK_MODULES([JSON_C], [json-c])
+AC_CHECK_DECLS([json_object_object_add_ex], [], [], [#include <json-c/json.h>])
 
 dnl Crypto backend configuration.
 AC_ARG_WITH([crypto_backend],
-	AS_HELP_STRING([--with-crypto_backend=BACKEND], [crypto backend (gcrypt/openssl/nss/kernel/nettle) [gcrypt]]),
-	[], [with_crypto_backend=gcrypt])
+	AS_HELP_STRING([--with-crypto_backend=BACKEND], [crypto backend (gcrypt/openssl/nss/kernel/nettle) [openssl]]),
+	[], [with_crypto_backend=openssl])
 
 dnl Kernel crypto API backend needed for benchmark and tcrypt
 AC_ARG_ENABLE([kernel_crypto],
@@ -547,35 +554,6 @@ AC_DEFUN([CS_ABSPATH], [
 ])
 
 dnl ==========================================================================
-dnl Python bindings
-AC_ARG_ENABLE([python],
-	AS_HELP_STRING([--enable-python], [enable Python bindings]))
-
-AC_ARG_WITH([python_version],
-	AS_HELP_STRING([--with-python_version=VERSION], [required Python version [2.6]]),
-	[PYTHON_VERSION=$withval], [PYTHON_VERSION=2.6])
-
-if test "x$enable_python" = "xyes"; then
-	AM_PATH_PYTHON([$PYTHON_VERSION])
-
-	AC_PATH_PROGS([PYTHON_CONFIG], [python${PYTHON_VERSION}-config python-config], [no])
-	if test "${PYTHON_CONFIG}" = "no"; then
-		AC_MSG_ERROR([cannot find python${PYTHON_VERSION}-config or python-config in PATH])
-	fi
-
-	AC_MSG_CHECKING(for python headers using $PYTHON_CONFIG --includes)
-	PYTHON_INCLUDES=$($PYTHON_CONFIG --includes)
-	AC_MSG_RESULT($PYTHON_INCLUDES)
-	AC_SUBST(PYTHON_INCLUDES)
-
-	AC_MSG_CHECKING(for python libraries using $PYTHON_CONFIG --libs)
-	PYTHON_LIBS=$($PYTHON_CONFIG --libs)
-	AC_MSG_RESULT($PYTHON_LIBS)
-	AC_SUBST(PYTHON_LIBS)
-fi
-AM_CONDITIONAL([PYTHON_CRYPTSETUP], [test "x$enable_python" = "xyes"])
-
-dnl ==========================================================================
 CS_STR_WITH([plain-hash],   [password hashing function for plain mode], [ripemd160])
 CS_STR_WITH([plain-cipher], [cipher for plain mode], [aes])
 CS_STR_WITH([plain-mode],   [cipher mode for plain mode], [cbc-essiv:sha256])
@@ -586,11 +564,21 @@ CS_STR_WITH([luks1-cipher], [cipher for LUKS1], [aes])
 CS_STR_WITH([luks1-mode],   [cipher mode for LUKS1], [xts-plain64])
 CS_NUM_WITH([luks1-keybits],[key length in bits for LUKS1], [256])
 
+AC_ARG_ENABLE([luks_adjust_xts_keysize], AS_HELP_STRING([--disable-luks-adjust-xts-keysize],
+	[XTS mode requires two keys, double default LUKS keysize if needed]),
+	[], [enable_luks_adjust_xts_keysize=yes])
+if test "x$enable_luks_adjust_xts_keysize" = "xyes"; then
+	AC_DEFINE(ENABLE_LUKS_ADJUST_XTS_KEYSIZE, 1, [XTS mode - double default LUKS keysize if needed])
+fi
+
 CS_STR_WITH([luks2-pbkdf],           [Default PBKDF algorithm (pbkdf2 or argon2i/argon2id) for LUKS2], [argon2i])
 CS_NUM_WITH([luks1-iter-time],       [PBKDF2 iteration time for LUKS1 (in ms)], [2000])
 CS_NUM_WITH([luks2-iter-time],       [Argon2 PBKDF iteration time for LUKS2 (in ms)], [2000])
 CS_NUM_WITH([luks2-memory-kb],       [Argon2 PBKDF memory cost for LUKS2 (in kB)], [1048576])
 CS_NUM_WITH([luks2-parallel-threads],[Argon2 PBKDF max parallel cost for LUKS2 (if CPUs available)], [4])
+
+CS_STR_WITH([luks2-keyslot-cipher], [fallback cipher for LUKS2 keyslot (if data encryption is incompatible)], [aes-xts-plain64])
+CS_NUM_WITH([luks2-keyslot-keybits],[fallback key size for LUKS2 keyslot (if data encryption is incompatible)], [512])
 
 CS_STR_WITH([loopaes-cipher], [cipher for loop-AES mode], [aes])
 CS_NUM_WITH([loopaes-keybits],[key length in bits for loop-AES mode], [256])
@@ -626,8 +614,8 @@ AC_SUBST(DEFAULT_LUKS2_LOCK_DIR_PERMS)
 
 dnl Override default LUKS format version (for cryptsetup or cryptsetup-reencrypt format actions only).
 AC_ARG_WITH([default_luks_format],
-	AS_HELP_STRING([--with-default-luks-format=FORMAT], [default LUKS format version (LUKS1/LUKS2) [LUKS1]]),
-	[], [with_default_luks_format=LUKS1])
+	AS_HELP_STRING([--with-default-luks-format=FORMAT], [default LUKS format version (LUKS1/LUKS2) [LUKS2]]),
+	[], [with_default_luks_format=LUKS2])
 
 case $with_default_luks_format in
 	LUKS1) default_luks=CRYPT_LUKS1 ;;

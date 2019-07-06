@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2
  *
- * Copyright (C) 2015-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2018, Milan Broz. All rights reserved.
+ * Copyright (C) 2015-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -58,32 +58,37 @@ json_object *LUKS2_get_tokens_jobj(struct luks2_hdr *hdr);
 void hexprint_base64(struct crypt_device *cd, json_object *jobj,
 		     const char *sep, const char *line_sep);
 
-json_object *parse_json_len(const char *json_area, uint64_t max_length, int *json_len);
+json_object *parse_json_len(struct crypt_device *cd, const char *json_area,
+			    uint64_t max_length, int *json_len);
 uint64_t json_object_get_uint64(json_object *jobj);
 uint32_t json_object_get_uint32(json_object *jobj);
 json_object *json_object_new_uint64(uint64_t value);
+int json_object_object_add_by_uint(json_object *jobj, unsigned key, json_object *jobj_val);
+void json_object_object_del_by_uint(json_object *jobj, unsigned key);
 
-void JSON_DBG(json_object *jobj, const char *desc);
+void JSON_DBG(struct crypt_device *cd, json_object *jobj, const char *desc);
 
 /*
  * LUKS2 JSON validation
  */
 
 /* validation helper */
-json_object *json_contains(json_object *jobj, const char *name, const char *section,
-		      const char *key, json_type type);
+json_object *json_contains(struct crypt_device *cd, json_object *jobj, const char *name,
+			   const char *section, const char *key, json_type type);
 
-int LUKS2_hdr_validate(json_object *hdr_jobj, uint64_t json_size);
-int LUKS2_keyslot_validate(json_object *hdr_jobj, json_object *hdr_keyslot, const char *key);
-int LUKS2_check_json_size(const struct luks2_hdr *hdr);
-int LUKS2_token_validate(json_object *hdr_jobj, json_object *jobj_token, const char *key);
+int LUKS2_hdr_validate(struct crypt_device *cd, json_object *hdr_jobj, uint64_t json_size);
+int LUKS2_keyslot_validate(struct crypt_device *cd, json_object *hdr_jobj,
+			   json_object *hdr_keyslot, const char *key);
+int LUKS2_check_json_size(struct crypt_device *cd, const struct luks2_hdr *hdr);
+int LUKS2_token_validate(struct crypt_device *cd, json_object *hdr_jobj,
+			 json_object *jobj_token, const char *key);
 void LUKS2_token_dump(struct crypt_device *cd, int token);
 
 /*
  * LUKS2 JSON repair for known glitches
  */
-void LUKS2_hdr_repair(json_object *jobj_hdr);
-void LUKS2_keyslots_repair(json_object *jobj_hdr);
+void LUKS2_hdr_repair(struct crypt_device *cd, json_object *jobj_hdr);
+void LUKS2_keyslots_repair(struct crypt_device *cd, json_object *jobj_hdr);
 
 /*
  * JSON array helpers
@@ -122,7 +127,7 @@ int placeholder_keyslot_alloc(struct crypt_device *cd,
 	size_t volume_key_len);
 
 /* validate all keyslot implementations in hdr json */
-int LUKS2_keyslots_validate(json_object *hdr_jobj);
+int LUKS2_keyslots_validate(struct crypt_device *cd, json_object *hdr_jobj);
 
 typedef struct  {
 	const char *name;

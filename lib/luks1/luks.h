@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup
  *
- * Copyright (C) 2004-2006, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2004-2006 Clemens Fruhwirth <clemens@endorphin.org>
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -107,17 +107,15 @@ int LUKS_check_cipher(struct crypt_device *ctx,
 		      const char *cipher,
 		      const char *cipher_mode);
 
-int LUKS_generate_phdr(
-	struct luks_phdr *header,
+int LUKS_generate_phdr(struct luks_phdr *header,
 	const struct volume_key *vk,
 	const char *cipherName,
 	const char *cipherMode,
 	const char *hashSpec,
 	const char *uuid,
-	unsigned int stripes,
-	unsigned int alignPayload,
-	unsigned int alignOffset,
-	int detached_metadata_device,
+	uint64_t data_offset,
+	uint64_t align_offset,
+	uint64_t required_alignment,
 	struct crypt_device *ctx);
 
 int LUKS_read_phdr(
@@ -177,13 +175,16 @@ int LUKS_wipe_header_areas(struct luks_phdr *hdr,
 crypt_keyslot_info LUKS_keyslot_info(struct luks_phdr *hdr, int keyslot);
 int LUKS_keyslot_find_empty(struct luks_phdr *hdr);
 int LUKS_keyslot_active_count(struct luks_phdr *hdr);
-int LUKS_keyslot_set(struct luks_phdr *hdr, int keyslot, int enable);
+int LUKS_keyslot_set(struct luks_phdr *hdr, int keyslot, int enable,
+		     struct crypt_device *ctx);
 int LUKS_keyslot_area(const struct luks_phdr *hdr,
 	int keyslot,
 	uint64_t *offset,
 	uint64_t *length);
 size_t LUKS_device_sectors(const struct luks_phdr *hdr);
 size_t LUKS_keyslots_offset(const struct luks_phdr *hdr);
+int LUKS_keyslot_pbkdf(struct luks_phdr *hdr, int keyslot,
+		       struct crypt_pbkdf_type *pbkdf);
 
 int LUKS1_activate(struct crypt_device *cd,
 		   const char *name,

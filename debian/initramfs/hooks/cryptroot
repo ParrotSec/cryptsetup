@@ -441,6 +441,10 @@ else
         CRYPTO_MODULES="${CRYPTO_MODULES:+$CRYPTO_MODULES }aesni"
     fi
 
+    # add userspace crypto module (only required for opening LUKS2 devices
+    # we add the module unconditionally as it's the default format)
+    CRYPTO_MODULES="${CRYPTO_MODULES:+$CRYPTO_MODULES }algif_skcipher"
+
     if [ "$MODULES" = most ]; then
         for d in "$MODULESDIR"/kernel/arch/*/crypto; do
             copy_modules_dir "${d#"$MODULESDIR/"}"
@@ -449,7 +453,7 @@ else
     else
         if [ "$MODULES" != "dep" ]; then
             # with large initramfs, we always add a basic subset of modules
-            add_crypto_modules aes algif_skcipher cbc chainiv cryptomgr krng sha256 xts
+            add_crypto_modules aes cbc chainiv cryptomgr krng sha256 xts
         fi
         add_crypto_modules $(printf '%s' "${CRYPTO_MODULES-}" | tr ' ' '\n' | sort -u)
     fi

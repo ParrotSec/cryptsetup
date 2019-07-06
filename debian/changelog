@@ -1,3 +1,115 @@
+cryptsetup (2:2.1.0-5parrot1) parrot; urgency=medium
+
+  * Import new Kali release.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Sun, 07 Jul 2019 01:49:46 +0200
+
+cryptsetup (2:2.1.0-5kali1) kali-experimental; urgency=medium
+
+  * Synchronize with Debian.
+  * Print a deprecation notice when the user calls luksAddNuke. The feature
+    moved to a separate package: cryptsetup-nuke-password.
+  * Add a Recommends from cryptsetup-initramfs to cryptsetup-nuke-password
+    to ease the switch.
+
+ -- Raphaël Hertzog <hertzog@debian.org>  Tue, 25 Jun 2019 11:01:51 +0200
+
+cryptsetup (2:2.1.0-5) unstable; urgency=medium
+
+  [ Jonas Meurer ]
+  * debian/README.*: Fix markdown formatting issues
+  * Copy https://wiki.debian.org/CryptsetupDebug to debian/README.debug
+
+  [ Guilhem Moulin ]
+  * d/README.Debian: New section "Unlocking LUKS devices from GRUB" pointing
+    to https://cryptsetup-team.pages.debian.net/cryptsetup/encrypted-boot.html .
+
+ -- Guilhem Moulin <guilhem@debian.org>  Mon, 10 Jun 2019 14:51:15 +0200
+
+cryptsetup (2:2.1.0-4) unstable; urgency=medium
+
+  [Guilhem Moulin]
+  * d/initramfs/hooks/cryptroot: Always add userspace crypto module
+    ('algif_skcipher' kernel module) to the initramfs.  This module is
+    required for required for opening LUKS2 devices, and since 2:2.0.2-2 it's
+    added to large initramfs (i.e., when the MODULES variable isn't set to
+    "dep").  It's now added regardless of the value of $MODULES, as 1/ LUKS2
+    is the default LUKS header format version; and 2/ we can't check at
+    initramfs creation time whether there are LUKS2 devices to be opened at
+    early boot stage (detached headers might not be present then).
+    Closes: #929616.
+
+  [Jonathan Dowland]
+  * Update package descriptions to reflect the move of luksformat from
+    cryptsetup-bin to cryptsetup-run. Closes: #928751.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Tue, 28 May 2019 17:04:16 +0200
+
+cryptsetup (2:2.1.0-3) unstable; urgency=medium
+
+  * d/scripts/decrypt_opensc: Fix standard output poisoning.  Thanks to Nils
+    Mueller for the report and patch.  (Closes: #926573.)
+  * d/initramfs/hooks/cryptopensc: Ensure that libpcsclite.so is copied to the
+    initramfs on non-usrmerge systems.  (Closes: #928263.)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Tue, 30 Apr 2019 21:20:47 +0200
+
+cryptsetup (2:2.1.0-2) unstable; urgency=medium
+
+  * debian/copyright:
+    + Update copyright years.
+    + Add OpenSSL linking exception, in accordance with upstream's "COPYING"
+      and "COPYING.LGPL" files.  Since 2:2.1.0-1 the cryptsetup binaries and
+      library are linked against libssl, which is the new upstream default
+      backend for LUKS header processing.
+  * debian/askpass.c: in the console backend, clear stdin's end-of-file
+    indicator before calling getline() again.  Thanks to Ken Milmore for the
+    detailed report and patch.  (Closes: #921906.)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Thu, 28 Feb 2019 22:32:43 +0100
+
+cryptsetup (2:2.1.0-1) unstable; urgency=medium
+
+  * New upstream release.  Highlights include:
+    - The on-disk LUKS format version now defaults to LUKS2 (use `luksFormat
+      --type luks1` to use LUKS1 format). Closes: #919725.
+    - The cryptographic backend used for LUKS header processing is now libssl
+      instead of libgcrypt.
+    - LUKS' default key size is now 512 in XTS mode, half of which is used for
+      block encryption.  XTS mode uses two internal keys, hence the previous
+      default key size (256) caused AES-128 to be used for block encryption,
+      while users were expecting AES-256.
+
+  [ Guilhem Moulin ]
+  * Add docs/Keyring.txt and docs/LUKS2-locking.txt to
+    /usr/share/doc/cryptsetup-run.
+  * debian/README.Debian: Mention that for non-persistent encrypted swap one
+    should also disable the resume device.
+  * debian/README.initramfs: Mention that keyscript=decrypt_derived normally
+    won't work with LUKS2 sources.  (The volume key of LUKS2 devices is by
+    default offloaded to the kernel keyring service, hence not readable by
+    userspace.)  Since 2:2.0.3-5 the keyscript loudly fails on such sources.
+  * decrypt_keyctl keyscript: Always use our askpass binary for password
+    prompt (fail instead of falling back to using stty or `read -s` if askpass
+    is not available).  askpass and decrypt_keyctl are both shipped in our
+    'cryptsetup-run' and 'cryptsetup-udeb' binary packages, and the cryptsetup
+    and askpass binaries are added together to the initramfs image.
+  * decrypt_keyctl: Document the identifier used in the user keyring:
+    "cryptsetup:$CRYPTTAB_KEY", or merely "cryptsetup" if "$CRYPTTAB_KEY" is
+    empty or "none".  The latter improves compatibility with gdm and
+    systemd-ask-password(1).
+  * debian/*: run wrap-and-sort(1).
+  * debian/doc/crypttab.xml: mention `cryptsetup refresh` and the `--persistent`
+    option flag.
+  * debian/control: Bump Standards-Version to 4.3.0 (no changes necessary).
+
+  [ Jonas Meurer ]
+  * Update docs about 'discard' option: Mention in manpage, that it's enabled
+    per default by Debian Installer. Give advice to add it to new devices in
+    /etc/crypttab and add it to crypttab example entries in the docs.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sat, 09 Feb 2019 00:40:17 +0100
+
 cryptsetup (2:2.0.6-1parrot1) testing; urgency=medium
 
   * Import new Debian release.

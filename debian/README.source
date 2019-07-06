@@ -54,4 +54,4 @@ Importing a new upstream release
 
            gbp buildpackage --git-tag
 
- -- Jonas Meurer <mejo@debian.org>  Fri, 15 Jun 2018 13:39:49 +0200
+ -- Jonas Meurer <jonas@freesources.org>  Fri, 15 Jun 2018 13:39:49 +0200

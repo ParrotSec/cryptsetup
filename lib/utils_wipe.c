@@ -1,9 +1,9 @@
 /*
  * utils_wipe - wipe a device
  *
- * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2018, Milan Broz
+ * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -52,7 +52,8 @@ static void wipeSpecial(char *buffer, size_t buffer_size, unsigned int turn)
 	}
 }
 
-static int crypt_wipe_special(int fd, size_t bsize, size_t alignment, char *buffer,
+static int crypt_wipe_special(struct crypt_device *cd, int fd, size_t bsize,
+			      size_t alignment, char *buffer,
 			      uint64_t offset, size_t size)
 {
 	int r;
@@ -61,12 +62,12 @@ static int crypt_wipe_special(int fd, size_t bsize, size_t alignment, char *buff
 
 	for (i = 0; i < 39; ++i) {
 		if (i <  5) {
-			r = crypt_random_get(NULL, buffer, size, CRYPT_RND_NORMAL);
+			r = crypt_random_get(cd, buffer, size, CRYPT_RND_NORMAL);
 		} else if (i >=  5 && i < 32) {
 			wipeSpecial(buffer, size, i - 5);
 			r = 0;
 		} else if (i >= 32 && i < 38) {
-			r = crypt_random_get(NULL, buffer, size, CRYPT_RND_NORMAL);
+			r = crypt_random_get(cd, buffer, size, CRYPT_RND_NORMAL);
 		} else if (i >= 38 && i < 39) {
 			memset(buffer, 0xFF, size);
 			r = 0;
@@ -81,7 +82,7 @@ static int crypt_wipe_special(int fd, size_t bsize, size_t alignment, char *buff
 	}
 
 	/* Rewrite it finally with random */
-	if (crypt_random_get(NULL, buffer, size, CRYPT_RND_NORMAL) < 0)
+	if (crypt_random_get(cd, buffer, size, CRYPT_RND_NORMAL) < 0)
 		return -EIO;
 
 	written = write_lseek_blockwise(fd, bsize, alignment, buffer, size, offset);
@@ -91,14 +92,14 @@ static int crypt_wipe_special(int fd, size_t bsize, size_t alignment, char *buff
 	return 0;
 }
 
-static int wipe_block(int devfd, crypt_wipe_pattern pattern, char *sf,
-		      size_t device_block_size, size_t alignment,
+static int wipe_block(struct crypt_device *cd, int devfd, crypt_wipe_pattern pattern,
+		      char *sf, size_t device_block_size, size_t alignment,
 		      size_t wipe_block_size, uint64_t offset, bool *need_block_init)
 {
 	int r;
 
 	if (pattern == CRYPT_WIPE_SPECIAL)
-		return crypt_wipe_special(devfd, device_block_size, alignment,
+		return crypt_wipe_special(cd, devfd, device_block_size, alignment,
 					  sf, offset, wipe_block_size);
 
 	if (*need_block_init) {
@@ -107,12 +108,12 @@ static int wipe_block(int devfd, crypt_wipe_pattern pattern, char *sf,
 			*need_block_init = false;
 			r = 0;
 		} else if (pattern == CRYPT_WIPE_RANDOM) {
-			r = crypt_random_get(NULL, sf, wipe_block_size,
+			r = crypt_random_get(cd, sf, wipe_block_size,
 					     CRYPT_RND_NORMAL) ? -EIO : 0;
 			*need_block_init = true;
 		} else if (pattern == CRYPT_WIPE_ENCRYPTED_ZERO) {
 			// FIXME
-			r = crypt_random_get(NULL, sf, wipe_block_size,
+			r = crypt_random_get(cd, sf, wipe_block_size,
 					     CRYPT_RND_NORMAL) ? -EIO : 0;
 			*need_block_init = true;
 		} else
@@ -145,7 +146,7 @@ int crypt_wipe_device(struct crypt_device *cd,
 	bool need_block_init = true;
 
 	/* Note: LUKS1 calls it with wipe_block not aligned to multiple of bsize */
-	bsize = device_block_size(device);
+	bsize = device_block_size(cd, device);
 	alignment = device_alignment(device);
 	if (!bsize || !alignment || !wipe_block_size)
 		return -EINVAL;
@@ -156,23 +157,21 @@ int crypt_wipe_device(struct crypt_device *cd,
 	if (MISALIGNED_512(offset) || MISALIGNED_512(length) || MISALIGNED_512(wipe_block_size))
 		return -EINVAL;
 
-	devfd = device_open(device, O_RDWR);
+	devfd = device_open(cd, device, O_RDWR);
 	if (devfd < 0)
 		return errno ? -errno : -EINVAL;
 
-	r = device_size(device, &dev_size);
-	if (r || dev_size == 0)
-		goto out;
+	if (length)
+		dev_size = offset + length;
+	else {
+		r = device_size(device, &dev_size);
+		if (r)
+			goto out;
 
-	if (dev_size < length)
-		length = 0;
-
-	if (length) {
-		if ((dev_size <= offset) || (dev_size - offset) < length) {
+		if (dev_size <= offset) {
 			r = -EINVAL;
 			goto out;
 		}
-		dev_size = offset + length;
 	}
 
 	r = posix_memalign((void **)&sf, alignment, wipe_block_size);
@@ -191,7 +190,7 @@ int crypt_wipe_device(struct crypt_device *cd,
 	}
 
 	if (pattern == CRYPT_WIPE_SPECIAL && !device_is_rotational(device)) {
-		log_dbg("Non-rotational device, using random data wipe mode.");
+		log_dbg(cd, "Non-rotational device, using random data wipe mode.");
 		pattern = CRYPT_WIPE_RANDOM;
 	}
 
@@ -201,7 +200,7 @@ int crypt_wipe_device(struct crypt_device *cd,
 
 		//log_dbg("Wipe %012" PRIu64 "-%012" PRIu64 " bytes", offset, offset + wipe_block_size);
 
-		r = wipe_block(devfd, pattern, sf, bsize, alignment,
+		r = wipe_block(cd, devfd, pattern, sf, bsize, alignment,
 			       wipe_block_size, offset, &need_block_init);
 		if (r) {
 			log_err(cd, "Device wipe error, offset %" PRIu64 ".", offset);
@@ -216,7 +215,7 @@ int crypt_wipe_device(struct crypt_device *cd,
 		}
 	}
 
-	device_sync(device, devfd);
+	device_sync(cd, device, devfd);
 out:
 	close(devfd);
 	free(sf);
@@ -253,14 +252,14 @@ int crypt_wipe(struct crypt_device *cd,
 	if (!wipe_block_size)
 		wipe_block_size = 1024*1024;
 
-	log_dbg("Wipe [%u] device %s, offset %" PRIu64 ", length %" PRIu64 ", block %zu.",
+	log_dbg(cd, "Wipe [%u] device %s, offset %" PRIu64 ", length %" PRIu64 ", block %zu.",
 		(unsigned)pattern, device_path(device), offset, length, wipe_block_size);
 
 	r = crypt_wipe_device(cd, device, pattern, offset, length,
 			      wipe_block_size, progress, usrptr);
 
 	if (dev_path)
-		device_free(device);
+		device_free(cd, device);
 
 	return r;
 }

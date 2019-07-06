@@ -41,13 +41,16 @@ Download
 --------
 All release tarballs and release notes are hosted on [kernel.org](https://www.kernel.org/pub/linux/utils/cryptsetup/).
 
-**The latest cryptsetup version is 2.0.5**
-  * [cryptsetup-2.0.5.tar.xz](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.5.tar.xz)
-  * Signature [cryptsetup-2.0.5.tar.sign](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.5.tar.sign)
+**The latest cryptsetup version is 2.0.6**
+  * [cryptsetup-2.0.6.tar.xz](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.6.tar.xz)
+  * Signature [cryptsetup-2.0.6.tar.sign](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.6.tar.sign)
     _(You need to decompress file first to check signature.)_
-  * [Cryptsetup 2.0.5 Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.5-ReleaseNotes).
+  * [Cryptsetup 2.0.6 Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.6-ReleaseNotes).
 
 Previous versions
+ * [Version 2.0.5](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.5.tar.xz) -
+   [Signature](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.5.tar.sign) -
+   [Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.5-ReleaseNotes).
  * [Version 2.0.4](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.4.tar.xz) -
    [Signature](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/cryptsetup-2.0.4.tar.sign) -
    [Release Notes](https://www.kernel.org/pub/linux/utils/cryptsetup/v2.0/v2.0.4-ReleaseNotes).
@@ -87,7 +90,7 @@ Source and API docs
 For development version code, please refer to [source](https://gitlab.com/cryptsetup/cryptsetup/tree/master) page,
 mirror on [kernel.org](https://git.kernel.org/cgit/utils/cryptsetup/cryptsetup.git/) or [GitHub](https://github.com/mbroz/cryptsetup).
 
-For libcryptsetup documentation see [libcryptsetup API](https://gitlab.com/cryptsetup/cryptsetup/wikis/API/index.html) page.
+For libcryptsetup documentation see [libcryptsetup API](https://mbroz.fedorapeople.org/libcryptsetup_API/) page.
 
 The libcryptsetup API/ABI changes are tracked in [compatibility report](https://abi-laboratory.pro/tracker/timeline/cryptsetup/).
 

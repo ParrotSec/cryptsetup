@@ -81,6 +81,10 @@
    contain either the string <emphasis>luks</emphasis> respectively
    <emphasis>tcrypt</emphasis> or the <emphasis>cipher</emphasis>,
    <emphasis>hash</emphasis> and <emphasis>size</emphasis> options.
+   Some options can be changed on active devices using
+   <command>cryptsetup refresh [&lt;options&gt;] &lt;name&gt;</command>.
+   Moreover some options can be permanently written to the metada of LUKS2
+   headers using the <command>--persistent</command> option flag.
   </simpara>
   <simpara>
    Options are in the format: <emphasis>key</emphasis>=<emphasis>value</emphasis>
@@ -251,14 +255,18 @@
     <term><emphasis>discard</emphasis></term>
     <listitem>
      <simpara>Allow using of discards (TRIM) requests for device.</simpara>
+     <simpara>Starting with Debian 10 (Buster), this option is added per
+      default to new dm-crypt devices by the Debian Installer. If you
+      don't care about leaking access patterns (filesystem type, used
+      space) and don't have hidden truecrypt volumes inside this volume,
+      then it should be safe to enable this option. See the following
+      warning for further information.</simpara>
      <simpara><emphasis role="strong">WARNING</emphasis>: Assess the
       specific security risks carefully before enabling this option.
       For example, allowing discards on encrypted devices may lead to
       the leak of information about the ciphertext device (filesystem
       type, used space etc.) if the discarded blocks can be located
       easily on the device later.</simpara>
-     <simpara>Kernel version 3.1 or more recent is required.
-      For older versions is the option ignored.</simpara>
     </listitem>
    </varlistentry>
 
@@ -448,7 +456,7 @@
      <simpara>
       The executable at the indicated path is executed with the value of the
       <emphasis>third field</emphasis> as only argument. The keyscript output
-      is passed to cryptsetup as decyption key. 
+      is passed to cryptsetup as decyption key.
       When used in initramfs, the executable either needs to be self-contained
       (i.e. does'nt rely on any external program which is not present in the
       initramfs environment) or the dependencies have to added to the initramfs
@@ -585,24 +593,24 @@
 # Encrypted swap device
 cswap /dev/sda6 /dev/urandom cipher=aes-xts-plain64,size=256,hash=sha1,swap
 
-# Encrypted LUKS disk with interactive password, identified by its UUID
-cdisk0 UUID=12345678-9abc-def012345-6789abcdef01 none luks
+# Encrypted LUKS disk with interactive password, identified by its UUID, discard enabled
+cdisk0 UUID=12345678-9abc-def012345-6789abcdef01 none luks,discard
 
-# Encrypted TCRYPT disk with interactive password
-tdisk0 /dev/sr0 none tcrypt
+# Encrypted TCRYPT disk with interactive password, discard enabled
+tdisk0 /dev/sr0 none tcrypt,discard
 
-# Encrypted ext4 disk with interactive password
+# Encrypted ext4 disk with interactive password, discard enabled
 # - retry 5 times if the check fails
-cdisk1 /dev/sda2 none cipher=aes-xts-plain64,size=256,hash=sha1,checkargs=ext4,tries=5
+cdisk1 /dev/sda2 none discard,cipher=aes-xts-plain64,size=256,hash=sha1,checkargs=ext4,tries=5
 
-# Encrypted disk with interactive password
+# Encrypted disk with interactive password, discard enabled
 # - use a nondefault check script
 # - no retries
-cdisk2 /dev/sdc1 none cipher=aes-xts-plain64,size=256,hash=sha1,check=customscript,tries=1
+cdisk2 /dev/sdc1 none discard,cipher=aes-xts-plain64,size=256,hash=sha1,check=customscript,tries=1
 
-# Encrypted disk with interactive password
+# Encrypted disk with interactive password, discard enabled
 # - Twofish as the cipher, RIPEMD-160 as the hash
-cdisk3 /dev/sda3 none cipher=twofish,size=256,hash=ripemd160
+cdisk3 /dev/sda3 none dscard,cipher=twofish,size=256,hash=ripemd160
    </screen>
   </para>
  </refsect1>

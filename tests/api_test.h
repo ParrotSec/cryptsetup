@@ -1,9 +1,9 @@
 /*
  * cryptsetup library API check functions
  *
- * Copyright (C) 2009-2018 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2018, Milan Broz
- * Copyright (C) 2016-2018, Ondrej Kozina
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Milan Broz
+ * Copyright (C) 2016-2019 Ondrej Kozina
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -36,6 +36,8 @@ extern uint64_t t_dev_offset;
 int t_device_size(const char *device, uint64_t *size);
 int t_dm_check_versions(void);
 int t_dm_crypt_keyring_support(void);
+int t_dm_crypt_cpu_switch_support(void);
+int t_dm_crypt_discard_support(void);
 
 int fips_mode(void);
 
@@ -85,7 +87,7 @@ void xlog(const char *msg, const char *tst, const char *func, int line, const ch
 
 #define SECTOR_SHIFT 9L
 #define SECTOR_SIZE 512
-#define TST_LOOP_FILE_SIZE (((1<<20)*50)>>SECTOR_SHIFT)
+#define TST_LOOP_FILE_SIZE (((1<<20)*100)>>SECTOR_SHIFT)
 #define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
 #define DIV_ROUND_UP_MODULO(n,d) (DIV_ROUND_UP(n,d)*(d))
 

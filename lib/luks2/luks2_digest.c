@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2, digest handling
  *
- * Copyright (C) 2015-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2018, Milan Broz. All rights reserved.
+ * Copyright (C) 2015-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -86,14 +86,12 @@ int LUKS2_digest_create(struct crypt_device *cd,
 	if (digest < 0)
 		return -EINVAL;
 
-	log_dbg("Creating new digest %d (%s).", digest, type);
+	log_dbg(cd, "Creating new digest %d (%s).", digest, type);
 
 	return dh->store(cd, digest, vk->key, vk->keylength) ?: digest;
 }
 
-int LUKS2_digest_by_keyslot(struct crypt_device *cd,
-	struct luks2_hdr *hdr,
-	int keyslot)
+int LUKS2_digest_by_keyslot(struct luks2_hdr *hdr, int keyslot)
 {
 	char keyslot_name[16];
 	json_object *jobj_digests, *jobj_digest_keyslots;
@@ -120,18 +118,18 @@ int LUKS2_digest_verify(struct crypt_device *cd,
 	const digest_handler *h;
 	int digest, r;
 
-	digest = LUKS2_digest_by_keyslot(cd, hdr, keyslot);
+	digest = LUKS2_digest_by_keyslot(hdr, keyslot);
 	if (digest < 0)
 		return digest;
 
-	log_dbg("Verifying key from keyslot %d, digest %d.", keyslot, digest);
+	log_dbg(cd, "Verifying key from keyslot %d, digest %d.", keyslot, digest);
 	h = LUKS2_digest_handler(cd, digest);
 	if (!h)
 		return -EINVAL;
 
 	r = h->verify(cd, digest, vk->key, vk->keylength);
 	if (r < 0) {
-		log_dbg("Digest %d (%s) verify failed with %d.", digest, h->name, r);
+		log_dbg(cd, "Digest %d (%s) verify failed with %d.", digest, h->name, r);
 		return r;
 	}
 
@@ -156,11 +154,11 @@ int LUKS2_digest_verify_by_segment(struct crypt_device *cd,
 	const digest_handler *h;
 	int digest, r;
 
-	digest = LUKS2_digest_by_segment(cd, hdr, segment);
+	digest = LUKS2_digest_by_segment(hdr, segment);
 	if (digest < 0)
 		return digest;
 
-	log_dbg("Verifying key digest %d.", digest);
+	log_dbg(cd, "Verifying key digest %d.", digest);
 
 	h = LUKS2_digest_handler(cd, digest);
 	if (!h)
@@ -168,7 +166,7 @@ int LUKS2_digest_verify_by_segment(struct crypt_device *cd,
 
 	r = h->verify(cd, digest, vk->key, vk->keylength);
 	if (r < 0) {
-		log_dbg("Digest %d (%s) verify failed with %d.", digest, h->name, r);
+		log_dbg(cd, "Digest %d (%s) verify failed with %d.", digest, h->name, r);
 		return r;
 	}
 
@@ -176,9 +174,7 @@ int LUKS2_digest_verify_by_segment(struct crypt_device *cd,
 }
 
 /* FIXME: segment can have more digests */
-int LUKS2_digest_by_segment(struct crypt_device *cd,
-	struct luks2_hdr *hdr,
-	int segment)
+int LUKS2_digest_by_segment(struct luks2_hdr *hdr, int segment)
 {
 	char segment_name[16];
 	json_object *jobj_digests, *jobj_digest_segments;
@@ -205,7 +201,7 @@ static int assign_one_digest(struct crypt_device *cd, struct luks2_hdr *hdr,
 	json_object *jobj1, *jobj_digest, *jobj_digest_keyslots;
 	char num[16];
 
-	log_dbg("Keyslot %i %s digest %i.", keyslot, assign ? "assigned to" : "unassigned from", digest);
+	log_dbg(cd, "Keyslot %i %s digest %i.", keyslot, assign ? "assigned to" : "unassigned from", digest);
 
 	jobj_digest = LUKS2_get_digest_jobj(hdr, digest);
 	if (!jobj_digest)
@@ -260,7 +256,7 @@ static int assign_one_segment(struct crypt_device *cd, struct luks2_hdr *hdr,
 	json_object *jobj1, *jobj_digest, *jobj_digest_segments;
 	char num[16];
 
-	log_dbg("Segment %i %s digest %i.", segment, assign ? "assigned to" : "unassigned from", digest);
+	log_dbg(cd, "Segment %i %s digest %i.", segment, assign ? "assigned to" : "unassigned from", digest);
 
 	jobj_digest = LUKS2_get_digest_jobj(hdr, digest);
 	if (!jobj_digest)
@@ -335,7 +331,7 @@ void LUKS2_digests_erase_unused(struct crypt_device *cd,
 
 	json_object_object_foreach(jobj_digests, key, val) {
 		if (digest_unused(val)) {
-			log_dbg("Erasing unused digest %d.", atoi(key));
+			log_dbg(cd, "Erasing unused digest %d.", atoi(key));
 			json_object_object_del(jobj_digests, key);
 		}
 	}
@@ -374,7 +370,7 @@ static char *get_key_description_by_digest(struct crypt_device *cd, int digest)
 int LUKS2_key_description_by_segment(struct crypt_device *cd,
 		struct luks2_hdr *hdr, struct volume_key *vk, int segment)
 {
-	char *desc = get_key_description_by_digest(cd, LUKS2_digest_by_segment(cd, hdr, segment));
+	char *desc = get_key_description_by_digest(cd, LUKS2_digest_by_segment(hdr, segment));
 	int r;
 
 	r = crypt_volume_key_set_description(vk, desc);
@@ -385,7 +381,7 @@ int LUKS2_key_description_by_segment(struct crypt_device *cd,
 int LUKS2_volume_key_load_in_keyring_by_keyslot(struct crypt_device *cd,
 		struct luks2_hdr *hdr, struct volume_key *vk, int keyslot)
 {
-	char *desc = get_key_description_by_digest(cd, LUKS2_digest_by_keyslot(cd, hdr, keyslot));
+	char *desc = get_key_description_by_digest(cd, LUKS2_digest_by_keyslot(hdr, keyslot));
 	int r;
 
 	r = crypt_volume_key_set_description(vk, desc);

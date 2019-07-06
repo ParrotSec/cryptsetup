@@ -1,10 +1,10 @@
 /*
  * libcryptsetup - cryptsetup library
  *
- * Copyright (C) 2004, Jana Saout <jana@saout.de>
- * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2018, Milan Broz
+ * Copyright (C) 2004 Jana Saout <jana@saout.de>
+ * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -63,6 +63,23 @@ struct crypt_device; /* crypt device handle */
  * 	 default log function.
  */
 int crypt_init(struct crypt_device **cd, const char *device);
+
+/**
+ * Initialize crypt device handle with optional data device and check
+ * if devices exist.
+ *
+ * @param cd Returns pointer to crypt device handle
+ * @param device Path to the backing device or detached header.
+ * @param data_device Path to the data device or @e NULL.
+ *
+ * @return @e 0 on success or negative errno value otherwise.
+ *
+ * @note Note that logging is not initialized here, possible messages use
+ * 	 default log function.
+ */
+int crypt_init_data_device(struct crypt_device **cd,
+	const char *device,
+	const char *data_device);
 
 /**
  * Initialize crypt device handle from provided active device name,
@@ -131,8 +148,29 @@ void crypt_set_confirm_callback(struct crypt_device *cd,
  * @param cd crypt device handle
  * @param device path to device
  *
+ * @returns 0 on success or negative errno value otherwise.
  */
 int crypt_set_data_device(struct crypt_device *cd, const char *device);
+
+/**
+ * Set data device offset in 512-byte sectors.
+ * Used for LUKS.
+ * This function is replacement for data alignment fields in LUKS param struct.
+ * If set to 0 (default), old behaviour is preserved.
+ * This value is reset on @link crypt_load @endlink.
+ *
+ * @param cd crypt device handle
+ * @param data_offset data offset in bytes
+ *
+ * @returns 0 on success or negative errno value otherwise.
+ *
+ * @note Data offset must be aligned to multiple of 8 (alignment to 4096-byte sectors)
+ * and must be big enough to accommodate the whole LUKS header with all keyslots.
+ * @note Data offset is enforced by this function, device topology
+ * information is no longer used after calling this function.
+ */
+int crypt_set_data_offset(struct crypt_device *cd, uint64_t data_offset);
+
 /** @} */
 
 /**
@@ -151,6 +189,8 @@ int crypt_set_data_device(struct crypt_device *cd, const char *device);
 #define CRYPT_LOG_VERBOSE  2
 /** debug log level - always on stdout */
 #define CRYPT_LOG_DEBUG -1
+/** debug log level - additional JSON output (for LUKS2) */
+#define CRYPT_LOG_DEBUG_JSON -2
 
 /**
  * Set log function.
@@ -247,6 +287,16 @@ int crypt_set_pbkdf_type(struct crypt_device *cd,
 	 const struct crypt_pbkdf_type *pbkdf);
 
 /**
+ * Get PBKDF (Password-Based Key Derivation Algorithm) parameters.
+ *
+ * @param pbkdf_type type of PBKDF
+ *
+ * @return struct on success or NULL value otherwise.
+ *
+ */
+const struct crypt_pbkdf_type *crypt_get_pbkdf_type_params(const char *pbkdf_type);
+
+/**
  * Get default PBKDF (Password-Based Key Derivation Algorithm) settings for keyslots.
  * Works only with LUKS device handles (both versions).
  *
@@ -307,6 +357,39 @@ int crypt_memory_lock(struct crypt_device *cd, int lock);
  * 	 In current version locking can be only switched off and cannot be switched on later.
  */
 int crypt_metadata_locking(struct crypt_device *cd, int enable);
+
+/**
+ * Set metadata header area sizes. This applies only to LUKS2.
+ * These values limit amount of metadata anf number of supportable keyslots.
+ *
+ * @param cd crypt device handle, can be @e NULL
+ * @param metadata_size size in bytes of JSON area + 4k binary header
+ * @param keyslots_size size in bytes of binary keyslots area
+ *
+ * @returns @e 0 on success or negative errno value otherwise.
+ *
+ * @note The metadata area is stored twice and both copies contain 4k binary header.
+ * Only 16,32,64,128,256,512,1024,2048 and 4096 kB value is allowed (see LUKS2 specification).
+ * @note Keyslots area size must be multiple of 4k with maximum 128MB.
+ */
+int crypt_set_metadata_size(struct crypt_device *cd,
+	uint64_t metadata_size,
+	uint64_t keyslots_size);
+
+/**
+ * Get metadata header area sizes. This applies only to LUKS2.
+ * These values limit amount of metadata anf number of supportable keyslots.
+ *
+ * @param cd crypt device handle
+ * @param metadata_size size in bytes of JSON area + 4k binary header
+ * @param keyslots_size size in bytes of binary keyslots area
+ *
+ * @returns @e 0 on success or negative errno value otherwise.
+ */
+int crypt_get_metadata_size(struct crypt_device *cd,
+	uint64_t *metadata_size,
+	uint64_t *keyslots_size);
+
 /** @} */
 
 /**
@@ -342,6 +425,13 @@ int crypt_metadata_locking(struct crypt_device *cd, int enable);
  * @return string according to device type or @e NULL if not known.
  */
 const char *crypt_get_type(struct crypt_device *cd);
+
+/**
+ * Get device default LUKS type
+ *
+ * @return string according to device type (CRYPT_LUKS1 or CRYPT_LUKS2).
+ */
+const char *crypt_get_default_type(void);
 
 /**
  *
@@ -960,6 +1050,10 @@ int crypt_keyslot_destroy(struct crypt_device *cd, int keyslot);
 #define CRYPT_ACTIVATE_CHECK_AT_MOST_ONCE (1 << 15)
 /** allow activation check including unbound keyslots (keyslots without segments) */
 #define CRYPT_ACTIVATE_ALLOW_UNBOUND_KEY (1 << 16)
+/** dm-integrity: activate automatic recalculation */
+#define CRYPT_ACTIVATE_RECALCULATE (1 << 17)
+/** reactivate existing and update flags, input only */
+#define CRYPT_ACTIVATE_REFRESH	(1 << 18)
 
 /**
  * Active device runtime attributes
@@ -1318,6 +1412,16 @@ const char *crypt_get_uuid(struct crypt_device *cd);
 const char *crypt_get_device_name(struct crypt_device *cd);
 
 /**
+ * Get path to detached metadata device or @e NULL if it is not detached.
+ *
+ * @param cd crypt device handle
+ *
+ * @return path to underlaying device name
+ *
+ */
+const char *crypt_get_metadata_device_name(struct crypt_device *cd);
+
+/**
  * Get device offset in 512-bytes sectors where real data starts (on underlying device).
  *
  * @param cd crypt device handle
@@ -1528,7 +1632,7 @@ int crypt_keyslot_area(struct crypt_device *cd,
 	uint64_t *length);
 
 /**
- * Get size (in bytes) of key for particular keyslot.
+ * Get size (in bytes) of stored key in particular keyslot.
  * Use for LUKS2 unbound keyslots, for other keyslots it is the same as @ref crypt_get_volume_key_size
  *
  * @param cd crypt device handle
@@ -1538,6 +1642,50 @@ int crypt_keyslot_area(struct crypt_device *cd,
  *
  */
 int crypt_keyslot_get_key_size(struct crypt_device *cd, int keyslot);
+
+/**
+ * Get cipher and key size for keyslot encryption.
+ * Use for LUKS2 keyslot to set different encryption type than for data encryption.
+ * Parameters will be used for next keyslot operations.
+ *
+ * @param cd crypt device handle
+ * @param keyslot keyslot number of CRYPT_ANY_SLOT for default
+ * @param key_size encryption key size (in bytes)
+ *
+ * @return cipher specification on success or @e NULL.
+ *
+ * @note This is the encryption of keyslot itself, not the data encryption algorithm!
+ */
+const char *crypt_keyslot_get_encryption(struct crypt_device *cd, int keyslot, size_t *key_size);
+
+/**
+ * Get PBKDF parameters for keyslot.
+ *
+ * @param cd crypt device handle
+ * @param keyslot keyslot number
+ * @param pbkdf struct with returned PBKDF parameters
+ *
+ * @return @e 0 on success or negative errno value otherwise.
+ */
+int crypt_keyslot_get_pbkdf(struct crypt_device *cd, int keyslot, struct crypt_pbkdf_type *pbkdf);
+
+/**
+ * Set encryption for keyslot.
+ * Use for LUKS2 keyslot to set different encryption type than for data encryption.
+ * Parameters will be used for next keyslot operations that create or change a keyslot.
+ *
+ * @param cd crypt device handle
+ * @param cipher (e.g. "aes-xts-plain64")
+ * @param key_size encryption key size (in bytes)
+ *
+ * @return @e 0 on success or negative errno value otherwise.
+ *
+ * @note To reset to default keyslot encryption (the same as for data)
+ *       set cipher to NULL and key size to 0.
+ */
+int crypt_keyslot_set_encryption(struct crypt_device *cd,
+	const char *cipher,
+	size_t key_size);
 
 /**
  * Get directory where mapped crypt devices are created
@@ -1591,6 +1739,8 @@ int crypt_header_restore(struct crypt_device *cd,
 
 /** Debug all */
 #define CRYPT_DEBUG_ALL  -1
+/** Debug all with adidtional JSON dump (for LUKS2) */
+#define CRYPT_DEBUG_JSON  -2
 /** Debug none */
 #define CRYPT_DEBUG_NONE  0
 

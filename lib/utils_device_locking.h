@@ -1,8 +1,8 @@
 /*
  * Metadata on-disk locking for processes serialization
  *
- * Copyright (C) 2016-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2016-2018, Ondrej Kozina. All rights reserved.
+ * Copyright (C) 2016-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2016-2019 Ondrej Kozina
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -30,8 +30,8 @@ int device_locked(struct crypt_lock_handle *h);
 
 struct crypt_lock_handle *device_read_lock_handle(struct crypt_device *cd, const char *device_path);
 struct crypt_lock_handle *device_write_lock_handle(struct crypt_device *cd, const char *device_path);
-void device_unlock_handle(struct crypt_lock_handle *h);
+void device_unlock_handle(struct crypt_device *cd, struct crypt_lock_handle *h);
 
-int device_locked_verify(int fd, struct crypt_lock_handle *h);
+int device_locked_verify(struct crypt_device *cd, int fd, struct crypt_lock_handle *h);
 
 #endif

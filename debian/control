@@ -1,7 +1,8 @@
 Source: cryptsetup
 Section: admin
 Priority: optional
-Maintainer: Debian Cryptsetup Team <pkg-cryptsetup-devel@alioth-lists.debian.net>
+XSBC-Original-Maintainer: Debian Cryptsetup Team <pkg-cryptsetup-devel@alioth-lists.debian.net>
+Maintainer: Kali Developers <devel@kali.org>
 Uploaders: Jonas Meurer <jonas@freesources.org>,
            Guilhem Moulin <guilhem@debian.org>
 Build-Depends: autoconf,
@@ -13,23 +14,23 @@ Build-Depends: autoconf,
                docbook-xml,
                docbook-xsl,
                gettext,
-               libargon2-0-dev,
+               libargon2-dev,
                libblkid-dev,
                libdevmapper-dev,
-               libgcrypt20-dev,
                libjson-c-dev,
                libpopt-dev,
                libselinux1-dev,
                libsepol1-dev,
+               libssl-dev,
                libtool,
                pkg-config,
                po-debconf,
                uuid-dev,
                xsltproc
-Standards-Version: 4.2.1
+Standards-Version: 4.3.0
 Homepage: https://gitlab.com/cryptsetup/cryptsetup
-Vcs-Browser: https://salsa.debian.org/cryptsetup-team/cryptsetup
-Vcs-Git: https://salsa.debian.org/cryptsetup-team/cryptsetup.git
+Vcs-Browser: https://gitlab.com/kalilinux/packages/cryptsetup
+Vcs-Git: https://gitlab.com/kalilinux/packages/cryptsetup.git
 
 Package: cryptsetup-run
 Architecture: linux-any
@@ -38,10 +39,8 @@ Depends: cryptsetup-bin (>= 2:1.6.0),
          ${misc:Depends},
          ${shlibs:Depends}
 Suggests: dosfstools, keyutils, liblocale-gettext-perl
-Replaces: cryptsetup (<< 2:2.0.3-1),
-          cryptsetup-bin (<< 2:2.0.3-2)
-Breaks: cryptsetup (<< 2:2.0.3-1),
-        cryptsetup-bin (<< 2:2.0.3-2)
+Replaces: cryptsetup (<< 2:2.0.3-1), cryptsetup-bin (<< 2:2.0.3-2)
+Breaks: cryptsetup (<< 2:2.0.3-1), cryptsetup-bin (<< 2:2.0.3-2)
 Description: disk encryption support - startup scripts
  Cryptsetup provides an interface for configuring encryption on block
  devices (such as /home or swap partitions), using the Linux kernel
@@ -53,6 +52,9 @@ Description: disk encryption support - startup scripts
  automatically configuring encrypted devices at boot time via the config
  file /etc/crypttab. Additional features are cryptoroot support through
  initramfs-tools and several supported ways to read a passphrase or key.
+ .
+ This package provides the cryptdisk_start and stop wrappers and
+ luksformat.
 
 Package: cryptsetup-bin
 Architecture: linux-any
@@ -63,16 +65,16 @@ Description: disk encryption support - command line tools
  device mapper target dm-crypt. It features integrated Linux Unified Key
  Setup (LUKS) support.
  .
- This package provides cryptsetup, cryptsetup-reencrypt and luksformat.
+ This package provides cryptsetup, cryptsetup-reencrypt, integritysetup
+ and veritysetup.
 
 Package: cryptsetup-initramfs
 Architecture: all
 Depends: busybox | busybox-static,
          cryptsetup-run (>= ${source:Version}),
          initramfs-tools (>= 0.129) | linux-initramfs-tool,
-         ${misc:Depends},
-         ${shlibs:Depends}
-Recommends: console-setup, kbd
+         ${misc:Depends}
+Recommends: console-setup, kbd, cryptsetup-nuke-password
 Breaks: cryptsetup (<< 2:2.0.3-1)
 Replaces: cryptsetup (<< 2:2.0.3-1)
 Description: disk encryption support - initramfs integration

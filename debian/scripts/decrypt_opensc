@@ -12,7 +12,7 @@
 check_card() {
     cardfound=0
 
-    if /usr/bin/opensc-tool -n 2>&1; then
+    if /usr/bin/opensc-tool -n >/dev/null 2>&1; then
         cardfound=1
     fi
 }
