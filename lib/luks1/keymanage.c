@@ -1,9 +1,9 @@
 /*
  * LUKS - Linux Unified Key Setup
  *
- * Copyright (C) 2004-2006, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2013-2018, Milan Broz
+ * Copyright (C) 2004-2006 Clemens Fruhwirth <clemens@endorphin.org>
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2013-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -36,23 +36,6 @@
 #include "luks.h"
 #include "af.h"
 #include "internal.h"
-
-/* Get size of struct luks_phdr with all keyslots material space */
-static size_t LUKS_calculate_device_sectors(size_t keyLen)
-{
-	size_t keyslot_sectors, sector;
-	int i;
-
-	keyslot_sectors = AF_split_sectors(keyLen, LUKS_STRIPES);
-	sector = LUKS_ALIGN_KEYSLOTS / SECTOR_SIZE;
-
-	for (i = 0; i < LUKS_NUMKEYS; i++) {
-		sector = size_round_up(sector, LUKS_ALIGN_KEYSLOTS / SECTOR_SIZE);
-		sector += keyslot_sectors;
-	}
-
-	return sector;
-}
 
 int LUKS_keyslot_area(const struct luks_phdr *hdr,
 	int keyslot,
@@ -111,13 +94,13 @@ static int LUKS_check_device_size(struct crypt_device *ctx, const struct luks_ph
 		return -EINVAL;
 
 	if (device_size(device, &dev_sectors)) {
-		log_dbg("Cannot get device size for device %s.", device_path(device));
+		log_dbg(ctx, "Cannot get device size for device %s.", device_path(device));
 		return -EIO;
 	}
 
 	dev_sectors >>= SECTOR_SHIFT;
 	hdr_sectors = LUKS_device_sectors(hdr);
-	log_dbg("Key length %u, device size %" PRIu64 " sectors, header size %"
+	log_dbg(ctx, "Key length %u, device size %" PRIu64 " sectors, header size %"
 		PRIu64 " sectors.", hdr->keyBytes, dev_sectors, hdr_sectors);
 
 	if (hdr_sectors > dev_sectors) {
@@ -144,7 +127,7 @@ static int LUKS_check_keyslots(struct crypt_device *ctx, const struct luks_phdr 
 	for (i = 0; i < LUKS_NUMKEYS; i++) {
 		/* enforce stripes == 4000 */
 		if (phdr->keyblock[i].stripes != LUKS_STRIPES) {
-			log_dbg("Invalid stripes count %u in keyslot %u.",
+			log_dbg(ctx, "Invalid stripes count %u in keyslot %u.",
 				phdr->keyblock[i].stripes, i);
 			log_err(ctx, _("LUKS keyslot %u is invalid."), i);
 			return -1;
@@ -152,7 +135,7 @@ static int LUKS_check_keyslots(struct crypt_device *ctx, const struct luks_phdr 
 
 		/* First sectors is the header itself */
 		if (phdr->keyblock[i].keyMaterialOffset * SECTOR_SIZE < sizeof(*phdr)) {
-			log_dbg("Invalid offset %u in keyslot %u.",
+			log_dbg(ctx, "Invalid offset %u in keyslot %u.",
 				phdr->keyblock[i].keyMaterialOffset, i);
 			log_err(ctx, _("LUKS keyslot %u is invalid."), i);
 			return -1;
@@ -163,7 +146,7 @@ static int LUKS_check_keyslots(struct crypt_device *ctx, const struct luks_phdr 
 			continue;
 
 		if (phdr->payloadOffset <= phdr->keyblock[i].keyMaterialOffset) {
-			log_dbg("Invalid offset %u in keyslot %u (beyond data area offset %u).",
+			log_dbg(ctx, "Invalid offset %u in keyslot %u (beyond data area offset %u).",
 				phdr->keyblock[i].keyMaterialOffset, i,
 				phdr->payloadOffset);
 			log_err(ctx, _("LUKS keyslot %u is invalid."), i);
@@ -171,7 +154,7 @@ static int LUKS_check_keyslots(struct crypt_device *ctx, const struct luks_phdr 
 		}
 
 		if (phdr->payloadOffset < (phdr->keyblock[i].keyMaterialOffset + secs_per_stripes)) {
-			log_dbg("Invalid keyslot size %u (offset %u, stripes %u) in "
+			log_dbg(ctx, "Invalid keyslot size %u (offset %u, stripes %u) in "
 				"keyslot %u (beyond data area offset %u).",
 				secs_per_stripes,
 				phdr->keyblock[i].keyMaterialOffset,
@@ -188,7 +171,7 @@ static int LUKS_check_keyslots(struct crypt_device *ctx, const struct luks_phdr 
 		next = sorted_areas[i];
 		if (phdr->keyblock[next].keyMaterialOffset <
 		    (phdr->keyblock[prev].keyMaterialOffset + secs_per_stripes)) {
-			log_dbg("Not enough space in LUKS keyslot %d.", prev);
+			log_dbg(ctx, "Not enough space in LUKS keyslot %d.", prev);
 			log_err(ctx, _("LUKS keyslot %u is invalid."), prev);
 			return -1;
 		}
@@ -235,19 +218,19 @@ int LUKS_hdr_backup(const char *backup_file, struct crypt_device *ctx)
 		goto out;
 	}
 
-	log_dbg("Storing backup of header (%zu bytes) and keyslot area (%zu bytes).",
+	log_dbg(ctx, "Storing backup of header (%zu bytes) and keyslot area (%zu bytes).",
 		sizeof(hdr), hdr_size - LUKS_ALIGN_KEYSLOTS);
 
-	log_dbg("Output backup file size: %zu bytes.", buffer_size);
+	log_dbg(ctx, "Output backup file size: %zu bytes.", buffer_size);
 
-	devfd = device_open(device, O_RDONLY);
+	devfd = device_open(ctx, device, O_RDONLY);
 	if (devfd < 0) {
 		log_err(ctx, _("Device %s is not a valid LUKS device."), device_path(device));
 		r = -EINVAL;
 		goto out;
 	}
 
-	if (read_blockwise(devfd, device_block_size(device), device_alignment(device),
+	if (read_blockwise(devfd, device_block_size(ctx, device), device_alignment(device),
 			   buffer, hdr_size) < (ssize_t)hdr_size) {
 		r = -EIO;
 		goto out;
@@ -329,7 +312,7 @@ int LUKS_hdr_restore(
 
 	r = LUKS_read_phdr(hdr, 0, 0, ctx);
 	if (r == 0) {
-		log_dbg("Device %s already contains LUKS header, checking UUID and offset.", device_path(device));
+		log_dbg(ctx, "Device %s already contains LUKS header, checking UUID and offset.", device_path(device));
 		if(hdr->payloadOffset != hdr_file.payloadOffset ||
 		   hdr->keyBytes != hdr_file.keyBytes) {
 			log_err(ctx, _("Data offset or key size differs on device and backup, restore failed."));
@@ -353,10 +336,10 @@ int LUKS_hdr_restore(
 		goto out;
 	}
 
-	log_dbg("Storing backup of header (%zu bytes) and keyslot area (%zu bytes) to device %s.",
+	log_dbg(ctx, "Storing backup of header (%zu bytes) and keyslot area (%zu bytes) to device %s.",
 		sizeof(*hdr), buffer_size - LUKS_ALIGN_KEYSLOTS, device_path(device));
 
-	devfd = device_open(device, O_RDWR);
+	devfd = device_open(ctx, device, O_RDWR);
 	if (devfd < 0) {
 		if (errno == EACCES)
 			log_err(ctx, _("Cannot write to device %s, permission denied."),
@@ -367,7 +350,7 @@ int LUKS_hdr_restore(
 		goto out;
 	}
 
-	if (write_blockwise(devfd, device_block_size(device), device_alignment(device),
+	if (write_blockwise(devfd, device_block_size(ctx, device), device_alignment(device),
 			    buffer, buffer_size) < buffer_size) {
 		r = -EIO;
 		goto out;
@@ -379,7 +362,7 @@ int LUKS_hdr_restore(
 	r = LUKS_read_phdr(hdr, 1, 0, ctx);
 out:
 	if (devfd >= 0) {
-		device_sync(device, devfd);
+		device_sync(ctx, device, devfd);
 		close(devfd);
 	}
 	crypt_safe_free(buffer);
@@ -412,19 +395,18 @@ static int _keyslot_repair(struct luks_phdr *phdr, struct crypt_device *ctx)
 
 	log_verbose(ctx, _("Repairing keyslots."));
 
-	log_dbg("Generating second header with the same parameters for check.");
+	log_dbg(ctx, "Generating second header with the same parameters for check.");
 	/* cipherName, cipherMode, hashSpec, uuid are already null terminated */
 	/* payloadOffset - cannot check */
 	r = LUKS_generate_phdr(&temp_phdr, vk, phdr->cipherName, phdr->cipherMode,
-			       phdr->hashSpec,phdr->uuid, LUKS_STRIPES,
-			       phdr->payloadOffset, 0,
-			       1, ctx);
+			       phdr->hashSpec, phdr->uuid,
+			       phdr->payloadOffset * SECTOR_SIZE, 0, 0, ctx);
 	if (r < 0)
 		goto out;
 
 	for(i = 0; i < LUKS_NUMKEYS; ++i) {
 		if (phdr->keyblock[i].active == LUKS_KEY_ENABLED)  {
-			log_dbg("Skipping repair for active keyslot %i.", i);
+			log_dbg(ctx, "Skipping repair for active keyslot %i.", i);
 			continue;
 		}
 
@@ -491,7 +473,7 @@ static int _check_and_convert_hdr(const char *device,
 	char luksMagic[] = LUKS_MAGIC;
 
 	if(memcmp(hdr->magic, luksMagic, LUKS_MAGIC_L)) { /* Check magic */
-		log_dbg("LUKS header not detected.");
+		log_dbg(ctx, "LUKS header not detected.");
 		if (require_luks_device)
 			log_err(ctx, _("Device %s is not a valid LUKS device."), device);
 		return -EINVAL;
@@ -565,7 +547,7 @@ int LUKS_read_phdr_backup(const char *backup_file,
 	ssize_t hdr_size = sizeof(struct luks_phdr);
 	int devfd = 0, r = 0;
 
-	log_dbg("Reading LUKS header of size %d from backup file %s",
+	log_dbg(ctx, "Reading LUKS header of size %d from backup file %s",
 		(int)hdr_size, backup_file);
 
 	devfd = open(backup_file, O_RDONLY);
@@ -604,16 +586,16 @@ int LUKS_read_phdr(struct luks_phdr *hdr,
 	if (repair && !require_luks_device)
 		return -EINVAL;
 
-	log_dbg("Reading LUKS header of size %zu from device %s",
+	log_dbg(ctx, "Reading LUKS header of size %zu from device %s",
 		hdr_size, device_path(device));
 
-	devfd = device_open(device, O_RDONLY);
+	devfd = device_open(ctx, device, O_RDONLY);
 	if (devfd < 0) {
 		log_err(ctx, _("Cannot open device %s."), device_path(device));
 		return -EINVAL;
 	}
 
-	if (read_blockwise(devfd, device_block_size(device), device_alignment(device),
+	if (read_blockwise(devfd, device_block_size(ctx, device), device_alignment(device),
 			   hdr, hdr_size) < hdr_size)
 		r = -EIO;
 	else
@@ -629,7 +611,7 @@ int LUKS_read_phdr(struct luks_phdr *hdr,
 	 * has bigger sector size.
 	 */
 	if (!r && hdr->keyblock[0].keyMaterialOffset * SECTOR_SIZE < LUKS_ALIGN_KEYSLOTS) {
-		log_dbg("Old unaligned LUKS keyslot detected, disabling direct-io.");
+		log_dbg(ctx, "Old unaligned LUKS keyslot detected, disabling direct-io.");
 		device_disable_direct_io(device);
 	}
 
@@ -647,14 +629,14 @@ int LUKS_write_phdr(struct luks_phdr *hdr,
 	struct luks_phdr convHdr;
 	int r;
 
-	log_dbg("Updating LUKS header of size %zu on device %s",
+	log_dbg(ctx, "Updating LUKS header of size %zu on device %s",
 		sizeof(struct luks_phdr), device_path(device));
 
 	r = LUKS_check_device_size(ctx, hdr, 1);
 	if (r)
 		return r;
 
-	devfd = device_open(device, O_RDWR);
+	devfd = device_open(ctx, device, O_RDWR);
 	if (devfd < 0) {
 		if (errno == EACCES)
 			log_err(ctx, _("Cannot write to device %s, permission denied."),
@@ -679,12 +661,12 @@ int LUKS_write_phdr(struct luks_phdr *hdr,
 		convHdr.keyblock[i].stripes            = htonl(hdr->keyblock[i].stripes);
 	}
 
-	r = write_blockwise(devfd, device_block_size(device), device_alignment(device),
+	r = write_blockwise(devfd, device_block_size(ctx, device), device_alignment(device),
 			    &convHdr, hdr_size) < hdr_size ? -EIO : 0;
 	if (r)
 		log_err(ctx, _("Error during update of LUKS header on device %s."), device_path(device));
 
-	device_sync(device, devfd);
+	device_sync(ctx, device, devfd);
 	close(devfd);
 
 	/* Re-read header from disk to be sure that in-memory and on-disk data are the same. */
@@ -705,7 +687,7 @@ int LUKS_check_cipher(struct crypt_device *ctx, size_t keylength, const char *ci
 	struct volume_key *empty_key;
 	char buf[SECTOR_SIZE];
 
-	log_dbg("Checking if cipher %s-%s is usable.", cipher, cipher_mode);
+	log_dbg(ctx, "Checking if cipher %s-%s is usable.", cipher, cipher_mode);
 
 	empty_key = crypt_alloc_volume_key(keylength, NULL);
 	if (!empty_key)
@@ -722,30 +704,53 @@ int LUKS_check_cipher(struct crypt_device *ctx, size_t keylength, const char *ci
 }
 
 int LUKS_generate_phdr(struct luks_phdr *header,
-		       const struct volume_key *vk,
-		       const char *cipherName, const char *cipherMode, const char *hashSpec,
-		       const char *uuid, unsigned int stripes,
-		       unsigned int alignPayload,
-		       unsigned int alignOffset,
-		       int detached_metadata_device,
-		       struct crypt_device *ctx)
+	const struct volume_key *vk,
+	const char *cipherName,
+	const char *cipherMode,
+	const char *hashSpec,
+	const char *uuid,
+	uint64_t data_offset,        /* in bytes */
+	uint64_t align_offset,       /* in bytes */
+	uint64_t required_alignment, /* in bytes */
+	struct crypt_device *ctx)
 {
-	unsigned int i = 0, hdr_sectors = LUKS_calculate_device_sectors(vk->keylength);
-	size_t blocksPerStripeSet, currentSector;
-	int r;
+	int i, r;
+	size_t keyslot_sectors, header_sectors;
 	uuid_t partitionUuid;
 	struct crypt_pbkdf_type *pbkdf;
 	double PBKDF2_temp;
 	char luksMagic[] = LUKS_MAGIC;
 
-	/* For separate metadata device allow zero alignment */
-	if (alignPayload == 0 && !detached_metadata_device)
-		alignPayload = DEFAULT_DISK_ALIGNMENT / SECTOR_SIZE;
+	if (data_offset % SECTOR_SIZE || align_offset % SECTOR_SIZE ||
+	    required_alignment % SECTOR_SIZE)
+		return -EINVAL;
 
-	if (alignPayload && detached_metadata_device && alignPayload < hdr_sectors) {
-		log_err(ctx, _("Data offset for detached LUKS header must be "
-			       "either 0 or higher than header size (%d sectors)."),
-			       hdr_sectors);
+	memset(header, 0, sizeof(struct luks_phdr));
+
+	keyslot_sectors = AF_split_sectors(vk->keylength, LUKS_STRIPES);
+	header_sectors = LUKS_ALIGN_KEYSLOTS / SECTOR_SIZE;
+
+	for (i = 0; i < LUKS_NUMKEYS; i++) {
+		header->keyblock[i].active = LUKS_KEY_DISABLED;
+		header->keyblock[i].keyMaterialOffset = header_sectors;
+		header->keyblock[i].stripes = LUKS_STRIPES;
+		header_sectors = size_round_up(header_sectors + keyslot_sectors,
+					       LUKS_ALIGN_KEYSLOTS / SECTOR_SIZE);
+	}
+	/* In sector is now size of all keyslot material space */
+
+	/* Data offset has priority */
+	if (data_offset)
+		header->payloadOffset = data_offset / SECTOR_SIZE;
+	else if (required_alignment) {
+		header->payloadOffset = size_round_up(header_sectors, (required_alignment / SECTOR_SIZE));
+		header->payloadOffset += (align_offset / SECTOR_SIZE);
+	} else
+		header->payloadOffset = 0;
+
+	if (header->payloadOffset && header->payloadOffset < header_sectors) {
+		log_err(ctx, _("Data offset for LUKS header must be "
+			       "either 0 or higher than header size."));
 		return -EINVAL;
 	}
 
@@ -761,8 +766,6 @@ int LUKS_generate_phdr(struct luks_phdr *header,
 	if (!uuid)
 		uuid_generate(partitionUuid);
 
-	memset(header,0,sizeof(struct luks_phdr));
-
 	/* Set Magic */
 	memcpy(header->magic,luksMagic,LUKS_MAGIC_L);
 	header->version=1;
@@ -774,7 +777,7 @@ int LUKS_generate_phdr(struct luks_phdr *header,
 
 	LUKS_fix_header_compatible(header);
 
-	log_dbg("Generating LUKS header version %d using hash %s, %s, %s, MK %d bytes",
+	log_dbg(ctx, "Generating LUKS header version %d using hash %s, %s, %s, MK %d bytes",
 		header->version, header->hashSpec ,header->cipherName, header->cipherMode,
 		header->keyBytes);
 
@@ -800,34 +803,15 @@ int LUKS_generate_phdr(struct luks_phdr *header,
 			header->mkDigestSalt, LUKS_SALTSIZE,
 			header->mkDigest,LUKS_DIGESTSIZE,
 			header->mkDigestIterations, 0, 0);
-	if(r < 0) {
+	if (r < 0) {
 		log_err(ctx, _("Cannot create LUKS header: header digest failed (using hash %s)."),
 			header->hashSpec);
 		return r;
 	}
 
-	currentSector = LUKS_ALIGN_KEYSLOTS / SECTOR_SIZE;
-	blocksPerStripeSet = AF_split_sectors(vk->keylength, stripes);
-	for(i = 0; i < LUKS_NUMKEYS; ++i) {
-		header->keyblock[i].active = LUKS_KEY_DISABLED;
-		header->keyblock[i].keyMaterialOffset = currentSector;
-		header->keyblock[i].stripes = stripes;
-		currentSector = size_round_up(currentSector + blocksPerStripeSet,
-						LUKS_ALIGN_KEYSLOTS / SECTOR_SIZE);
-	}
-
-	if (detached_metadata_device) {
-		/* for separate metadata device use alignPayload directly */
-		header->payloadOffset = alignPayload;
-	} else {
-		/* alignOffset - offset from natural device alignment provided by topology info */
-		currentSector = size_round_up(currentSector, alignPayload);
-		header->payloadOffset = currentSector + alignOffset;
-	}
-
         uuid_unparse(partitionUuid, header->uuid);
 
-	log_dbg("Data offset %d, UUID %s, digest iterations %" PRIu32,
+	log_dbg(ctx, "Data offset %d, UUID %s, digest iterations %" PRIu32,
 		header->payloadOffset, header->uuid, header->mkDigestIterations);
 
 	return 0;
@@ -875,7 +859,7 @@ int LUKS_set_key(unsigned int keyIndex,
 	         return -EINVAL;
 	}
 
-	log_dbg("Calculating data for key slot %d", keyIndex);
+	log_dbg(ctx, "Calculating data for key slot %d", keyIndex);
 	pbkdf = crypt_get_pbkdf(ctx);
 	r = crypt_benchmark_pbkdf_internal(ctx, pbkdf, vk->keylength);
 	if (r < 0)
@@ -887,7 +871,7 @@ int LUKS_set_key(unsigned int keyIndex,
 	 */
 	hdr->keyblock[keyIndex].passwordIterations =
 		at_least(pbkdf->iterations, LUKS_SLOT_ITERATIONS_MIN);
-	log_dbg("Key slot %d use %" PRIu32 " password iterations.", keyIndex,
+	log_dbg(ctx, "Key slot %d use %" PRIu32 " password iterations.", keyIndex,
 		hdr->keyblock[keyIndex].passwordIterations);
 
 	derived_key = crypt_alloc_volume_key(hdr->keyBytes, NULL);
@@ -917,13 +901,13 @@ int LUKS_set_key(unsigned int keyIndex,
 		goto out;
 	}
 
-	log_dbg("Using hash %s for AF in key slot %d, %d stripes",
+	log_dbg(ctx, "Using hash %s for AF in key slot %d, %d stripes",
 		hdr->hashSpec, keyIndex, hdr->keyblock[keyIndex].stripes);
-	r = AF_split(vk->key,AfKey,vk->keylength,hdr->keyblock[keyIndex].stripes,hdr->hashSpec);
+	r = AF_split(ctx, vk->key, AfKey, vk->keylength, hdr->keyblock[keyIndex].stripes, hdr->hashSpec);
 	if (r < 0)
 		goto out;
 
-	log_dbg("Updating key slot %d [0x%04x] area.", keyIndex,
+	log_dbg(ctx, "Updating key slot %d [0x%04x] area.", keyIndex,
 		hdr->keyblock[keyIndex].keyMaterialOffset << 9);
 	/* Encryption via dm */
 	r = LUKS_encrypt_to_storage(AfKey,
@@ -936,7 +920,7 @@ int LUKS_set_key(unsigned int keyIndex,
 		goto out;
 
 	/* Mark the key as active in phdr */
-	r = LUKS_keyslot_set(hdr, (int)keyIndex, 1);
+	r = LUKS_keyslot_set(hdr, (int)keyIndex, 1, ctx);
 	if (r < 0)
 		goto out;
 
@@ -983,7 +967,7 @@ static int LUKS_open_key(unsigned int keyIndex,
 	size_t AFEKSize;
 	int r;
 
-	log_dbg("Trying to open key slot %d [%s].", keyIndex,
+	log_dbg(ctx, "Trying to open key slot %d [%s].", keyIndex,
 		dbg_slot_state(ki));
 
 	if (ki < CRYPT_SLOT_ACTIVE)
@@ -1008,7 +992,7 @@ static int LUKS_open_key(unsigned int keyIndex,
 	if (r < 0)
 		goto out;
 
-	log_dbg("Reading key slot %d area.", keyIndex);
+	log_dbg(ctx, "Reading key slot %d area.", keyIndex);
 	r = LUKS_decrypt_from_storage(AfKey,
 				      AFEKSize,
 				      hdr->cipherName, hdr->cipherMode,
@@ -1018,7 +1002,7 @@ static int LUKS_open_key(unsigned int keyIndex,
 	if (r < 0)
 		goto out;
 
-	r = AF_merge(AfKey,vk->key,vk->keylength,hdr->keyblock[keyIndex].stripes,hdr->hashSpec);
+	r = AF_merge(ctx, AfKey, vk->key, vk->keylength, hdr->keyblock[keyIndex].stripes, hdr->hashSpec);
 	if (r < 0)
 		goto out;
 
@@ -1076,7 +1060,7 @@ int LUKS_del_key(unsigned int keyIndex,
 	if (r)
 		return r;
 
-	r = LUKS_keyslot_set(hdr, keyIndex, 0);
+	r = LUKS_keyslot_set(hdr, keyIndex, 0, ctx);
 	if (r) {
 		log_err(ctx, _("Key slot %d is invalid, please select keyslot between 0 and %d."),
 			keyIndex, LUKS_NUMKEYS - 1);
@@ -1155,7 +1139,7 @@ int LUKS_keyslot_active_count(struct luks_phdr *hdr)
 	return num;
 }
 
-int LUKS_keyslot_set(struct luks_phdr *hdr, int keyslot, int enable)
+int LUKS_keyslot_set(struct luks_phdr *hdr, int keyslot, int enable, struct crypt_device *ctx)
 {
 	crypt_keyslot_info ki = LUKS_keyslot_info(hdr, keyslot);
 
@@ -1163,7 +1147,7 @@ int LUKS_keyslot_set(struct luks_phdr *hdr, int keyslot, int enable)
 		return -EINVAL;
 
 	hdr->keyblock[keyslot].active = enable ? LUKS_KEY_ENABLED : LUKS_KEY_DISABLED;
-	log_dbg("Key slot %d was %s in LUKS header.", keyslot, enable ? "enabled" : "disabled");
+	log_dbg(ctx, "Key slot %d was %s in LUKS header.", keyslot, enable ? "enabled" : "disabled");
 	return 0;
 }
 
@@ -1173,41 +1157,20 @@ int LUKS1_activate(struct crypt_device *cd,
 		   uint32_t flags)
 {
 	int r;
-	char *dm_cipher = NULL;
-	enum devcheck device_check;
 	struct crypt_dm_active_device dmd = {
-		.target = DM_CRYPT,
-		.uuid   = crypt_get_uuid(cd),
-		.flags  = flags,
-		.size   = 0,
-		.data_device = crypt_data_device(cd),
-		.u.crypt = {
-			.cipher = NULL,
-			.vk     = vk,
-			.offset = crypt_get_data_offset(cd),
-			.iv_offset = 0,
-			.sector_size = crypt_get_sector_size(cd),
-		}
+		.flags = flags,
+		.uuid = crypt_get_uuid(cd),
 	};
 
-	if (dmd.flags & CRYPT_ACTIVATE_SHARED)
-		device_check = DEV_SHARED;
-	else
-		device_check = DEV_EXCL;
+	r = dm_crypt_target_set(&dmd.segment, 0, dmd.size, crypt_data_device(cd),
+			vk, crypt_get_cipher_spec(cd), crypt_get_iv_offset(cd),
+			crypt_get_data_offset(cd), crypt_get_integrity(cd),
+			crypt_get_integrity_tag_size(cd), crypt_get_sector_size(cd));
+	if (!r)
+		r = create_or_reload_device(cd, name, CRYPT_LUKS1, &dmd);
 
-	r = device_block_adjust(cd, dmd.data_device, device_check,
-				 dmd.u.crypt.offset, &dmd.size, &dmd.flags);
-	if (r)
-		return r;
+	dm_targets_free(cd, &dmd);
 
-	r = asprintf(&dm_cipher, "%s-%s", crypt_get_cipher(cd), crypt_get_cipher_mode(cd));
-	if (r < 0)
-		return -ENOMEM;
-
-	dmd.u.crypt.cipher = dm_cipher;
-	r = dm_create_device(cd, name, CRYPT_LUKS1, &dmd, 0);
-
-	free(dm_cipher);
 	return r;
 }
 
@@ -1229,7 +1192,7 @@ int LUKS_wipe_header_areas(struct luks_phdr *hdr,
 		wipe_block = 4096;
 	}
 
-	log_dbg("Wiping LUKS areas (0x%06" PRIx64 " - 0x%06" PRIx64") with zeroes.",
+	log_dbg(ctx, "Wiping LUKS areas (0x%06" PRIx64 " - 0x%06" PRIx64") with zeroes.",
 		offset, length + offset);
 
 	r = crypt_wipe_device(ctx, crypt_metadata_device(ctx), CRYPT_WIPE_ZERO,
@@ -1252,7 +1215,7 @@ int LUKS_wipe_header_areas(struct luks_phdr *hdr,
 		if (length == 0 || offset < 4096)
 			return -EINVAL;
 
-		log_dbg("Wiping keyslot %i area (0x%06" PRIx64 " - 0x%06" PRIx64") with random data.",
+		log_dbg(ctx, "Wiping keyslot %i area (0x%06" PRIx64 " - 0x%06" PRIx64") with random data.",
 			i, offset, length + offset);
 
 		r = crypt_wipe_device(ctx, crypt_metadata_device(ctx), CRYPT_WIPE_RANDOM,
@@ -1262,4 +1225,19 @@ int LUKS_wipe_header_areas(struct luks_phdr *hdr,
 	}
 
 	return r;
+}
+
+int LUKS_keyslot_pbkdf(struct luks_phdr *hdr, int keyslot, struct crypt_pbkdf_type *pbkdf)
+{
+	if (keyslot >= LUKS_NUMKEYS || keyslot < 0)
+		return -EINVAL;
+
+	pbkdf->type = CRYPT_KDF_PBKDF2;
+	pbkdf->hash = hdr->hashSpec;
+	pbkdf->iterations = hdr->keyblock[keyslot].passwordIterations;
+	pbkdf->max_memory_kb = 0;
+	pbkdf->parallel_threads = 0;
+	pbkdf->time_ms = 0;
+	pbkdf->flags = 0;
+	return 0;
 }

@@ -1,8 +1,8 @@
 /*
  * cryptsetup-reencrypt - crypt utility for offline re-encryption
  *
- * Copyright (C) 2012-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2018, Milan Broz All rights reserved.
+ * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2019 Milan Broz All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -28,7 +28,6 @@
 #define PACKAGE_REENC "crypt_reencrypt"
 
 #define NO_UUID "cafecafe-cafe-cafe-cafe-cafecafeeeee"
-#define MAX_BCK_SECTORS 8192
 
 static const char *opt_cipher = NULL;
 static const char *opt_hash = NULL;
@@ -78,6 +77,7 @@ struct reenc_ctx {
 	uint64_t device_size_org_real;
 	uint64_t device_offset;
 	uint64_t device_shift;
+	uint64_t data_offset;
 
 	unsigned int stained:1;
 	unsigned int in_progress:1;
@@ -147,7 +147,7 @@ static const char *luksType(const char *type)
 		return CRYPT_LUKS1;
 
 	if (!type || !strcmp(type, "luks"))
-		return DEFAULT_LUKS_FORMAT;
+		return crypt_get_default_type();
 
 	return NULL;
 }
@@ -269,55 +269,24 @@ out:
 	return r;
 }
 
-static int create_empty_header(const char *new_file, const char *old_file,
-			       uint64_t data_sector)
+static int create_empty_header(const char *new_file, uint64_t data_sectors)
 {
-	struct stat st;
-	ssize_t size = 0;
 	int fd, r = 0;
-	char *buf;
 
-	/* Never create header > 4MiB */
-	if (data_sector > MAX_BCK_SECTORS)
-		data_sector = MAX_BCK_SECTORS;
+	data_sectors *= SECTOR_SIZE;
 
-	/* new header file of the same size as old backup */
-	if (old_file) {
-		if (stat(old_file, &st) == -1 ||
-		    (st.st_mode & S_IFMT) != S_IFREG ||
-		    (st.st_size > 16 * 1024 * 1024))
-			return -EINVAL;
-		size = st.st_size;
-	}
+	if (!data_sectors)
+		data_sectors = 4096;
 
-	/*
-	 * if requesting key size change, try to use offset
-	 * here can be enough space to fit new key.
-	 */
-	if (opt_key_size && data_sector)
-		size = data_sector * SECTOR_SIZE;
+	log_dbg("Creating empty file %s of size %" PRIu64 ".", new_file, data_sectors);
 
-	/* if reducing size, be sure we have enough space */
-	if (opt_reduce_size)
-		size += opt_reduce_size;
+	/* coverity[toctou] */
+	fd = open(new_file, O_CREAT|O_EXCL|O_WRONLY, S_IRUSR|S_IWUSR);
+	if (fd == -1 || posix_fallocate(fd, 0, data_sectors))
+		r = -EINVAL;
+	if (fd >= 0)
+		close(fd);
 
-	log_dbg("Creating empty file %s of size %lu.", new_file, (unsigned long)size);
-
-	if (!size || !(buf = malloc(size)))
-		return -ENOMEM;
-	memset(buf, 0, size);
-
-	fd = creat(new_file, S_IRUSR|S_IWUSR);
-	if(fd == -1) {
-		free(buf);
-		return -EINVAL;
-	}
-
-	if (write(fd, buf, size) < size)
-		r = -EIO;
-
-	close(fd);
-	free(buf);
 	return r;
 }
 
@@ -476,9 +445,8 @@ static int activate_luks_headers(struct reenc_ctx *rc)
 	} else
 		return -EINVAL;
 
-	if ((r = crypt_init(&cd, rc->header_file_org)) ||
-	    (r = crypt_load(cd, CRYPT_LUKS, NULL)) ||
-	    (r = crypt_set_data_device(cd, rc->device)))
+	if ((r = crypt_init_data_device(&cd, rc->header_file_org, rc->device)) ||
+	    (r = crypt_load(cd, CRYPT_LUKS, NULL)))
 		goto out;
 
 	log_verbose(_("Activating temporary device using old LUKS header."));
@@ -487,9 +455,8 @@ static int activate_luks_headers(struct reenc_ctx *rc)
 		CRYPT_ACTIVATE_READONLY|CRYPT_ACTIVATE_PRIVATE)) < 0)
 		goto out;
 
-	if ((r = crypt_init(&cd_new, rc->header_file_new)) ||
-	    (r = crypt_load(cd_new, CRYPT_LUKS, NULL)) ||
-	    (r = crypt_set_data_device(cd_new, rc->device)))
+	if ((r = crypt_init_data_device(&cd_new, rc->header_file_new, rc->device)) ||
+	    (r = crypt_load(cd_new, CRYPT_LUKS, NULL)))
 		goto out;
 
 	log_verbose(_("Activating temporary device using new LUKS header."));
@@ -508,24 +475,20 @@ out:
 
 static int set_pbkdf_params(struct crypt_device *cd, const char *dev_type)
 {
+	const struct crypt_pbkdf_type *pbkdf_default;
 	struct crypt_pbkdf_type pbkdf = {};
 
-	if (!strcmp(dev_type, CRYPT_LUKS1)) {
-		if (opt_pbkdf && strcmp(opt_pbkdf, CRYPT_KDF_PBKDF2))
-			return -EINVAL;
-		pbkdf.type = CRYPT_KDF_PBKDF2;
-		pbkdf.hash = opt_hash ?: DEFAULT_LUKS1_HASH;
-		pbkdf.time_ms = opt_iteration_time ?: DEFAULT_LUKS1_ITER_TIME;
-	} else if (!strcmp(dev_type, CRYPT_LUKS2)) {
-		pbkdf.type = opt_pbkdf ?: DEFAULT_LUKS2_PBKDF;
-		pbkdf.hash = opt_hash ?: DEFAULT_LUKS1_HASH;
-		pbkdf.time_ms = opt_iteration_time ?: DEFAULT_LUKS2_ITER_TIME;
-		if (strcmp(pbkdf.type, CRYPT_KDF_PBKDF2)) {
-			pbkdf.max_memory_kb = opt_pbkdf_memory;
-			pbkdf.parallel_threads = opt_pbkdf_parallel;
-		}
-	} else
+	pbkdf_default = crypt_get_pbkdf_default(dev_type);
+	if (!pbkdf_default)
 		return -EINVAL;
+
+	pbkdf.type = opt_pbkdf ?: pbkdf_default->type;
+	pbkdf.hash = opt_hash ?: pbkdf_default->hash;
+	pbkdf.time_ms = (uint32_t)opt_iteration_time ?: pbkdf_default->time_ms;
+	if (strcmp(pbkdf.type, CRYPT_KDF_PBKDF2)) {
+		pbkdf.max_memory_kb = opt_pbkdf_memory ?: pbkdf_default->max_memory_kb;
+		pbkdf.parallel_threads = opt_pbkdf_parallel ?: pbkdf_default->parallel_threads;
+	}
 
 	if (opt_pbkdf_iterations) {
 		pbkdf.iterations = opt_pbkdf_iterations;
@@ -569,6 +532,8 @@ static int create_new_header(struct reenc_ctx *rc, struct crypt_device *cd_old,
 			     const char *uuid,
 			     const char *key, int key_size,
 			     const char *type,
+			     uint64_t metadata_size,
+			     uint64_t keyslots_size,
 			     void *params)
 {
 	struct crypt_device *cd_new = NULL;
@@ -585,6 +550,18 @@ static int create_new_header(struct reenc_ctx *rc, struct crypt_device *cd_old,
 	r = set_pbkdf_params(cd_new, type);
 	if (r) {
 		log_err(_("Failed to set PBKDF parameters."));
+		goto out;
+	}
+
+	r = crypt_set_data_offset(cd_new, rc->data_offset);
+	if (r) {
+		log_err(_("Failed to set data offset."));
+		goto out;
+	}
+
+	r = crypt_set_metadata_size(cd_new, metadata_size, keyslots_size);
+	if (r) {
+		log_err(_("Failed to set metadata size."));
 		goto out;
 	}
 
@@ -704,6 +681,7 @@ static int backup_luks_headers(struct reenc_ctx *rc)
 	char cipher [MAX_CIPHER_LEN], cipher_mode[MAX_CIPHER_LEN];
 	char *key = NULL;
 	size_t key_size;
+	uint64_t mdata_size = 0, keyslots_size = 0;
 	int r;
 
 	log_dbg("Creating LUKS header backup for device %s.", hdr_device(rc));
@@ -729,14 +707,12 @@ static int backup_luks_headers(struct reenc_ctx *rc)
 	if (rc->reencrypt_mode == DECRYPT)
 		goto out;
 
-	if ((r = create_empty_header(rc->header_file_new, rc->header_file_org,
-		crypt_get_data_offset(cd))))
+	rc->data_offset = crypt_get_data_offset(cd) + ROUND_SECTOR(opt_reduce_size);
+
+	if ((r = create_empty_header(rc->header_file_new, rc->data_offset)))
 		goto out;
 
 	params.hash = opt_hash ?: DEFAULT_LUKS1_HASH;
-	params.data_alignment = crypt_get_data_offset(cd);
-	params.data_alignment += ROUND_SECTOR(opt_reduce_size);
-	params2.data_alignment = params.data_alignment;
 	params2.data_device = params.data_device = rc->device;
 	params2.sector_size = crypt_get_sector_size(cd);
 
@@ -768,6 +744,9 @@ static int backup_luks_headers(struct reenc_ctx *rc)
 	if (r < 0)
 		goto out;
 
+	if (isLUKS2(crypt_get_type(cd)) && crypt_get_metadata_size(cd, &mdata_size, &keyslots_size))
+		goto out;
+
 	r = create_new_header(rc, cd,
 		opt_cipher ? cipher : crypt_get_cipher(cd),
 		opt_cipher ? cipher_mode : crypt_get_cipher_mode(cd),
@@ -775,6 +754,8 @@ static int backup_luks_headers(struct reenc_ctx *rc)
 		key,
 		key_size,
 		rc->type,
+		mdata_size,
+		keyslots_size,
 		isLUKS2(rc->type) ? (void*)&params2 : (void*)&params);
 
 	if (!r && isLUKS2(rc->type))
@@ -792,16 +773,7 @@ static int backup_fake_header(struct reenc_ctx *rc)
 {
 	struct crypt_device *cd_new = NULL;
 	struct crypt_params_luks1 params = {0};
-	const struct crypt_pbkdf_type luks2_pbkdf = {
-		.type = DEFAULT_LUKS2_PBKDF,
-		.hash = opt_hash ?: DEFAULT_LUKS1_HASH,
-		.time_ms = DEFAULT_LUKS2_ITER_TIME,
-		.max_memory_kb = DEFAULT_LUKS2_MEMORY_KB,
-		.parallel_threads = DEFAULT_LUKS2_PARALLEL_THREADS
-	};
-	struct crypt_params_luks2 params2 = {
-		.pbkdf = &luks2_pbkdf
-	};
+	struct crypt_params_luks2 params2 = {0};
 	char cipher [MAX_CIPHER_LEN], cipher_mode[MAX_CIPHER_LEN];
 	const char *header_file_fake;
 	int r;
@@ -822,7 +794,7 @@ static int backup_fake_header(struct reenc_ctx *rc)
 		}
 	}
 
-	r = create_empty_header(header_file_fake, NULL, MAX_BCK_SECTORS);
+	r = create_empty_header(header_file_fake, 0);
 	if (r < 0)
 		return r;
 
@@ -830,6 +802,7 @@ static int backup_fake_header(struct reenc_ctx *rc)
 	params2.data_alignment = params.data_alignment = 0;
 	params2.data_device = params.data_device = rc->device;
 	params2.sector_size = crypt_get_sector_size(NULL);
+	params2.pbkdf = crypt_get_pbkdf_default(CRYPT_LUKS2);
 
 	r = crypt_init(&cd_new, header_file_fake);
 	if (r < 0)
@@ -851,7 +824,7 @@ static int backup_fake_header(struct reenc_ctx *rc)
 	if (rc->reencrypt_mode == DECRYPT)
 		goto out;
 
-	r = create_empty_header(rc->header_file_new, rc->header_file_org, 0);
+	r = create_empty_header(rc->header_file_new, ROUND_SECTOR(opt_reduce_size));
 	if (r < 0)
 		goto out;
 
@@ -862,6 +835,8 @@ static int backup_fake_header(struct reenc_ctx *rc)
 		NULL, NULL,
 		(opt_key_size ? opt_key_size : DEFAULT_LUKS1_KEYBITS) / 8,
 		rc->type,
+		0,
+		0,
 		isLUKS2(rc->type) ? (void*)&params2 : (void*)&params);
 out:
 	crypt_free(cd_new);
@@ -1095,9 +1070,9 @@ static void zero_rest_of_device(int fd, size_t block_size, void *buf,
 			s1 = *bytes;
 
 		s2 = write(fd, buf, s1);
-		if (s2 < 0) {
-			log_dbg("Write error, expecting %zu, got %zd.",
-				block_size, s2);
+		if (s2 != s1) {
+			log_dbg("Write error, expecting %zd, got %zd.",
+				s1, s2);
 			return;
 		}
 
@@ -1344,9 +1319,8 @@ static int initialize_passphrase(struct reenc_ctx *rc, const char *device)
 		return r > 0 ? 0 : r;
 	}
 
-	if ((r = crypt_init(&cd, device)) ||
-	    (r = crypt_load(cd, CRYPT_LUKS, NULL)) ||
-	    (r = crypt_set_data_device(cd, rc->device))) {
+	if ((r = crypt_init_data_device(&cd, device, rc->device)) ||
+	    (r = crypt_load(cd, CRYPT_LUKS, NULL))) {
 		crypt_free(cd);
 		return r;
 	}

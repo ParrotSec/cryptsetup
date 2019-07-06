@@ -1,8 +1,8 @@
 /*
  * Linux kernel userspace API crypto backend implementation (skcipher)
  *
- * Copyright (C) 2012-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2018, Milan Broz
+ * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2019 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -247,11 +247,9 @@ int crypt_cipher_check(const char *name, const char *mode,
 	if (!key)
 		return -ENOMEM;
 
-	r = crypt_backend_rng(key, key_length, CRYPT_RND_NORMAL, 0);
-	if (r < 0) {
-		free (key);
-		return r;
-	}
+	/* We cannot use RNG yet, any key works here, tweak the first part if it is split key (XTS). */
+	memset(key, 0xab, key_length);
+	*key = 0xef;
 
 	r = _crypt_cipher_init(&c, key, key_length, &sa);
 	if (c)

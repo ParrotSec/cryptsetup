@@ -1,8 +1,8 @@
 /*
  * veritysetup - setup cryptographic volumes for dm-verity
  *
- * Copyright (C) 2012-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2018, Milan Broz
+ * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -145,7 +145,7 @@ static int _activate(const char *dm_device,
 	ssize_t hash_size;
 	int r;
 
-	if ((r = crypt_init(&cd, hash_device)))
+	if ((r = crypt_init_data_device(&cd, hash_device, data_device)))
 		goto out;
 
 	if (opt_ignore_corruption)
@@ -170,9 +170,6 @@ static int _activate(const char *dm_device,
 			goto out;
 		r = crypt_format(cd, CRYPT_VERITY, NULL, NULL, NULL, NULL, 0, &params);
 	}
-	if (r < 0)
-		goto out;
-	r = crypt_set_data_device(cd, data_device);
 	if (r < 0)
 		goto out;
 

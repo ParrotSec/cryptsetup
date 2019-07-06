@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2
  *
- * Copyright (C) 2015-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2018, Milan Broz. All rights reserved.
+ * Copyright (C) 2015-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -125,13 +125,16 @@ struct luks2_keyslot_params {
 
 #define LUKS2_HDR_BIN_LEN sizeof(struct luks2_hdr_disk)
 
-#define LUKS2_HDR_DEFAULT_LEN 0x400000 /* 4 MiB */
+//#define LUKS2_DEFAULT_HDR_SIZE 0x400000  /* 4 MiB */
+#define LUKS2_DEFAULT_HDR_SIZE 0x1000000 /* 16 MiB */
 
 #define LUKS2_MAX_KEYSLOTS_SIZE 0x8000000 /* 128 MiB */
 
+#define LUKS2_HDR_OFFSET_MAX 0x400000 /* 4 MiB */
+
 /* Offsets for secondary header (for scan if primary header is corrupted). */
 #define LUKS2_HDR2_OFFSETS { 0x04000, 0x008000, 0x010000, 0x020000, \
-                             0x40000, 0x080000, 0x100000, 0x200000, 0x400000 }
+                             0x40000, 0x080000, 0x100000, 0x200000, LUKS2_HDR_OFFSET_MAX }
 
 int LUKS2_hdr_version_unlocked(struct crypt_device *cd,
 	const char *backup_file);
@@ -150,7 +153,7 @@ int LUKS2_hdr_labels(struct crypt_device *cd,
 	const char *subsystem,
 	int commit);
 
-void LUKS2_hdr_free(struct luks2_hdr *hdr);
+void LUKS2_hdr_free(struct crypt_device *cd, struct luks2_hdr *hdr);
 
 int LUKS2_hdr_backup(struct crypt_device *cd,
 		     struct luks2_hdr *hdr,
@@ -161,8 +164,9 @@ int LUKS2_hdr_restore(struct crypt_device *cd,
 
 uint64_t LUKS2_hdr_and_areas_size(json_object *jobj);
 uint64_t LUKS2_keyslots_size(json_object *jobj);
+uint64_t LUKS2_metadata_size(json_object *jobj);
 
-int LUKS2_keyslot_cipher_incompatible(struct crypt_device *cd);
+int LUKS2_keyslot_cipher_incompatible(struct crypt_device *cd, const char *cipher_spec);
 
 /*
  * Generic LUKS2 keyslot
@@ -261,9 +265,7 @@ int LUKS2_tokens_count(struct luks2_hdr *hdr);
 /*
  * Generic LUKS2 digest
  */
-int LUKS2_digest_by_segment(struct crypt_device *cd,
-	struct luks2_hdr *hdr,
-	int segment);
+int LUKS2_digest_by_segment(struct luks2_hdr *hdr, int segment);
 
 int LUKS2_digest_verify_by_segment(struct crypt_device *cd,
 	struct luks2_hdr *hdr,
@@ -295,9 +297,7 @@ int LUKS2_digest_segment_assign(struct crypt_device *cd,
 	int assign,
 	int commit);
 
-int LUKS2_digest_by_keyslot(struct crypt_device *cd,
-	struct luks2_hdr *hdr,
-	int keyslot);
+int LUKS2_digest_by_keyslot(struct luks2_hdr *hdr, int keyslot);
 
 int LUKS2_digest_create(struct crypt_device *cd,
 	const char *type,
@@ -327,9 +327,11 @@ int LUKS2_generate_hdr(
 	const char *integrity,
 	const char *uuid,
 	unsigned int sector_size,
-	unsigned int alignPayload,
-	unsigned int alignOffset,
-	int detached_metadata_device);
+	uint64_t data_offset,
+	uint64_t align_offset,
+	uint64_t required_alignment,
+	uint64_t metadata_size,
+	uint64_t keyslots_size);
 
 int LUKS2_check_metadata_area_size(uint64_t metadata_size);
 int LUKS2_check_keyslots_area_size(uint64_t keyslots_size);
@@ -342,11 +344,10 @@ int LUKS2_get_sector_size(struct luks2_hdr *hdr);
 const char *LUKS2_get_cipher(struct luks2_hdr *hdr, int segment);
 const char *LUKS2_get_integrity(struct luks2_hdr *hdr, int segment);
 int LUKS2_keyslot_params_default(struct crypt_device *cd, struct luks2_hdr *hdr,
-	size_t key_size, struct luks2_keyslot_params *params);
-int LUKS2_get_keyslot_params(struct luks2_hdr *hdr, int keyslot,
-	struct luks2_keyslot_params *params);
+	 struct luks2_keyslot_params *params);
 int LUKS2_get_volume_key_size(struct luks2_hdr *hdr, int segment);
-int LUKS2_get_keyslot_key_size(struct luks2_hdr *hdr, int keyslot);
+int LUKS2_get_keyslot_stored_key_size(struct luks2_hdr *hdr, int keyslot);
+const char *LUKS2_get_keyslot_cipher(struct luks2_hdr *hdr, int keyslot, size_t *key_size);
 int LUKS2_keyslot_find_empty(struct luks2_hdr *hdr, const char *type);
 int LUKS2_keyslot_active_count(struct luks2_hdr *hdr, int segment);
 int LUKS2_keyslot_for_segment(struct luks2_hdr *hdr, int keyslot, int segment);
@@ -355,6 +356,8 @@ int LUKS2_keyslot_area(struct luks2_hdr *hdr,
 	int keyslot,
 	uint64_t *offset,
 	uint64_t *length);
+int LUKS2_keyslot_pbkdf(struct luks2_hdr *hdr, int keyslot, struct crypt_pbkdf_type *pbkdf);
+
 /*
  * Permanent activation flags stored in header
  */

@@ -1,8 +1,8 @@
 /*
- * utils_pbkdf - PBKDF ssettings for libcryptsetup
+ * utils_pbkdf - PBKDF settings for libcryptsetup
  *
- * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2018, Milan Broz
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -24,19 +24,42 @@
 
 #include "internal.h"
 
-const struct crypt_pbkdf_type default_luks2 = {
-	.type = DEFAULT_LUKS2_PBKDF,
+const struct crypt_pbkdf_type default_pbkdf2 = {
+	.type = CRYPT_KDF_PBKDF2,
+	.hash = DEFAULT_LUKS1_HASH,
+	.time_ms = DEFAULT_LUKS1_ITER_TIME
+};
+
+const struct crypt_pbkdf_type default_argon2i = {
+	.type = CRYPT_KDF_ARGON2I,
 	.hash = DEFAULT_LUKS1_HASH,
 	.time_ms = DEFAULT_LUKS2_ITER_TIME,
 	.max_memory_kb = DEFAULT_LUKS2_MEMORY_KB,
 	.parallel_threads = DEFAULT_LUKS2_PARALLEL_THREADS
 };
 
-const struct crypt_pbkdf_type default_luks1 = {
-	.type = CRYPT_KDF_PBKDF2,
+const struct crypt_pbkdf_type default_argon2id = {
+	.type = CRYPT_KDF_ARGON2ID,
 	.hash = DEFAULT_LUKS1_HASH,
-	.time_ms = DEFAULT_LUKS1_ITER_TIME
+	.time_ms = DEFAULT_LUKS2_ITER_TIME,
+	.max_memory_kb = DEFAULT_LUKS2_MEMORY_KB,
+	.parallel_threads = DEFAULT_LUKS2_PARALLEL_THREADS
 };
+
+const struct crypt_pbkdf_type *crypt_get_pbkdf_type_params(const char *pbkdf_type)
+{
+	if (!pbkdf_type)
+		return NULL;
+
+	if (!strcmp(pbkdf_type, CRYPT_KDF_PBKDF2))
+		return &default_pbkdf2;
+	else if (!strcmp(pbkdf_type, CRYPT_KDF_ARGON2I))
+		return &default_argon2i;
+	else if (!strcmp(pbkdf_type, CRYPT_KDF_ARGON2ID))
+		return &default_argon2id;
+
+	return NULL;
+}
 
 static uint32_t adjusted_phys_memory(void)
 {
@@ -156,10 +179,19 @@ int init_pbkdf_type(struct crypt_device *cd,
 	uint32_t old_flags, memory_kb;
 	int r;
 
+	if (crypt_fips_mode()) {
+		if (pbkdf && strcmp(pbkdf->type, CRYPT_KDF_PBKDF2)) {
+			log_err(cd, "Only PBKDF2 is supported in FIPS mode.");
+			return -EINVAL;
+		}
+		if (!pbkdf)
+			pbkdf = crypt_get_pbkdf_type_params(CRYPT_KDF_PBKDF2);
+	}
+
 	if (!pbkdf && dev_type && !strcmp(dev_type, CRYPT_LUKS2))
-		pbkdf = &default_luks2;
+		pbkdf = crypt_get_pbkdf_type_params(DEFAULT_LUKS2_PBKDF);
 	else if (!pbkdf)
-		pbkdf = &default_luks1;
+		pbkdf = crypt_get_pbkdf_type_params(CRYPT_KDF_PBKDF2);
 
 	r = verify_pbkdf_params(cd, pbkdf);
 	if (r)
@@ -201,7 +233,7 @@ int init_pbkdf_type(struct crypt_device *cd,
 	cd_pbkdf->parallel_threads = pbkdf->parallel_threads;
 
 	if (cd_pbkdf->parallel_threads > pbkdf_limits.max_parallel) {
-		log_dbg("Maximum PBKDF threads is %d (requested %d).",
+		log_dbg(cd, "Maximum PBKDF threads is %d (requested %d).",
 			pbkdf_limits.max_parallel, cd_pbkdf->parallel_threads);
 		cd_pbkdf->parallel_threads = pbkdf_limits.max_parallel;
 	}
@@ -209,7 +241,7 @@ int init_pbkdf_type(struct crypt_device *cd,
 	if (cd_pbkdf->parallel_threads) {
 		cpus = crypt_cpusonline();
 		if (cd_pbkdf->parallel_threads > cpus) {
-			log_dbg("Only %u active CPUs detected, "
+			log_dbg(cd, "Only %u active CPUs detected, "
 				"PBKDF threads decreased from %d to %d.",
 				cpus, cd_pbkdf->parallel_threads, cpus);
 			cd_pbkdf->parallel_threads = cpus;
@@ -219,14 +251,14 @@ int init_pbkdf_type(struct crypt_device *cd,
 	if (cd_pbkdf->max_memory_kb) {
 		memory_kb = adjusted_phys_memory();
 		if (cd_pbkdf->max_memory_kb > memory_kb) {
-			log_dbg("Not enough physical memory detected, "
+			log_dbg(cd, "Not enough physical memory detected, "
 				"PBKDF max memory decreased from %dkB to %dkB.",
 				cd_pbkdf->max_memory_kb, memory_kb);
 			cd_pbkdf->max_memory_kb = memory_kb;
 		}
 	}
 
-	log_dbg("PBKDF %s, hash %s, time_ms %u (iterations %u), max_memory_kb %u, parallel_threads %u.",
+	log_dbg(cd, "PBKDF %s, hash %s, time_ms %u (iterations %u), max_memory_kb %u, parallel_threads %u.",
 		cd_pbkdf->type ?: "(none)", cd_pbkdf->hash ?: "(none)", cd_pbkdf->time_ms,
 		cd_pbkdf->iterations, cd_pbkdf->max_memory_kb, cd_pbkdf->parallel_threads);
 
@@ -241,7 +273,7 @@ int crypt_set_pbkdf_type(struct crypt_device *cd, const struct crypt_pbkdf_type 
 		return -EINVAL;
 
 	if (!pbkdf)
-		log_dbg("Resetting pbkdf type to default");
+		log_dbg(cd, "Resetting pbkdf type to default");
 
 	crypt_get_pbkdf(cd)->flags = 0;
 
@@ -261,10 +293,10 @@ const struct crypt_pbkdf_type *crypt_get_pbkdf_default(const char *type)
 	if (!type)
 		return NULL;
 
-	if (!strcmp(type, CRYPT_LUKS1))
-		return &default_luks1;
+	if (!strcmp(type, CRYPT_LUKS1) || crypt_fips_mode())
+		return crypt_get_pbkdf_type_params(CRYPT_KDF_PBKDF2);
 	else if (!strcmp(type, CRYPT_LUKS2))
-		return &default_luks2;
+		return crypt_get_pbkdf_type_params(DEFAULT_LUKS2_PBKDF);
 
 	return NULL;
 }
@@ -283,7 +315,7 @@ void crypt_set_iteration_time(struct crypt_device *cd, uint64_t iteration_time_m
 
 	if (pbkdf->type && verify_pbkdf_params(cd, pbkdf)) {
 		pbkdf->time_ms = old_time_ms;
-		log_dbg("Invalid iteration time.");
+		log_dbg(cd, "Invalid iteration time.");
 		return;
 	}
 
@@ -293,5 +325,5 @@ void crypt_set_iteration_time(struct crypt_device *cd, uint64_t iteration_time_m
 	pbkdf->flags &= ~(CRYPT_PBKDF_NO_BENCHMARK);
 	pbkdf->iterations = 0;
 
-	log_dbg("Iteration time set to %" PRIu64 " milliseconds.", iteration_time_ms);
+	log_dbg(cd, "Iteration time set to %" PRIu64 " milliseconds.", iteration_time_ms);
 }

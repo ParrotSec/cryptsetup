@@ -1,9 +1,9 @@
 /*
  * cryptsetup plain device helper functions
  *
- * Copyright (C) 2004, Jana Saout <jana@saout.de>
- * Copyright (C) 2010-2018 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2018, Milan Broz
+ * Copyright (C) 2004 Jana Saout <jana@saout.de>
+ * Copyright (C) 2010-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -64,7 +64,7 @@ static int hash(const char *hash_name, size_t key_size, char *key,
 
 #define PLAIN_HASH_LEN_MAX 256
 
-int crypt_plain_hash(struct crypt_device *ctx __attribute__((unused)),
+int crypt_plain_hash(struct crypt_device *cd,
 		     const char *hash_name,
 		     char *key, size_t key_size,
 		     const char *passphrase, size_t passphrase_size)
@@ -73,7 +73,7 @@ int crypt_plain_hash(struct crypt_device *ctx __attribute__((unused)),
 	size_t hash_size, pad_size;
 	int r;
 
-	log_dbg("Plain: hashing passphrase using %s.", hash_name);
+	log_dbg(cd, "Plain: hashing passphrase using %s.", hash_name);
 
 	if (strlen(hash_name) >= PLAIN_HASH_LEN_MAX)
 		return -EINVAL;
@@ -85,11 +85,11 @@ int crypt_plain_hash(struct crypt_device *ctx __attribute__((unused)),
 		*s = '\0';
 		s++;
 		if (!*s || sscanf(s, "%zd", &hash_size) != 1) {
-			log_dbg("Hash length is not a number");
+			log_dbg(cd, "Hash length is not a number");
 			return -EINVAL;
 		}
 		if (hash_size > key_size) {
-			log_dbg("Hash length %zd > key length %zd",
+			log_dbg(cd, "Hash length %zd > key length %zd",
 				hash_size, key_size);
 			return -EINVAL;
 		}
@@ -102,7 +102,7 @@ int crypt_plain_hash(struct crypt_device *ctx __attribute__((unused)),
 	/* No hash, copy passphrase directly */
 	if (!strcmp(hash_name_buf, "plain")) {
 		if (passphrase_size < hash_size) {
-			log_dbg("Too short plain passphrase.");
+			log_dbg(cd, "Too short plain passphrase.");
 			return -EINVAL;
 		}
 		memcpy(key, passphrase, hash_size);

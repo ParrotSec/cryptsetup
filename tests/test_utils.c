@@ -1,8 +1,8 @@
 /*
  * cryptsetup library API test utilities
  *
- * Copyright (C) 2009-2018 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2018, Milan Broz
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -254,10 +254,18 @@ int crypt_decode_key(char *key, const char *hex, unsigned int size)
 
 void global_log_callback(int level, const char *msg, void *usrptr)
 {
-	int len;
+	size_t len;
 
-	if (_debug)
-		printf("LOG: %s", msg);
+	if (_debug) {
+		if (level == CRYPT_LOG_DEBUG)
+			fprintf(stdout, "# %s\n", msg);
+		else
+			fprintf(stdout, "%s", msg);
+	}
+
+	if (level <= CRYPT_LOG_DEBUG)
+		return;
+
 	strncat(global_log, msg, sizeof(global_log) - strlen(global_log));
 	global_lines++;
 	if (level == CRYPT_LOG_ERROR) {
@@ -411,6 +419,17 @@ out:
 int t_dm_crypt_keyring_support(void)
 {
 	return t_dm_crypt_flags & T_DM_KERNEL_KEYRING_SUPPORTED;
+}
+
+int t_dm_crypt_cpu_switch_support(void)
+{
+	return t_dm_crypt_flags & (T_DM_SAME_CPU_CRYPT_SUPPORTED |
+				   T_DM_SUBMIT_FROM_CRYPT_CPUS_SUPPORTED);
+}
+
+int t_dm_crypt_discard_support(void)
+{
+	return t_dm_crypt_flags & T_DM_DISCARDS_SUPPORTED;
 }
 
 /* loop helpers */

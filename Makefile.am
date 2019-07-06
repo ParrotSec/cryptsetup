@@ -1,6 +1,5 @@
 EXTRA_DIST = COPYING.LGPL FAQ docs misc
 SUBDIRS = po tests
-TESTS =
 CLEANFILES =
 DISTCLEAN_TARGETS =
 
@@ -25,8 +24,6 @@ tmpfilesd_DATA =
 
 include man/Makemodule.am
 
-include python/Makemodule.am
-
 include scripts/Makemodule.am
 
 if CRYPTO_INTERNAL_ARGON2
@@ -40,7 +37,6 @@ include src/Makemodule.am
 ACLOCAL_AMFLAGS = -I m4
 
 DISTCHECK_CONFIGURE_FLAGS = 	\
-	--enable-python		\
 	--with-tmpfilesdir=$$dc_install_base/usr/lib/tmpfiles.d \
 	--enable-internal-argon2 --enable-internal-sse-argon2
 

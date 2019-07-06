@@ -1,4 +1,4 @@
-.TH CRYPTSETUP "8" "January 2018" "cryptsetup" "Maintenance Commands"
+.TH CRYPTSETUP "8" "January 2019" "cryptsetup" "Maintenance Commands"
 .SH NAME
 cryptsetup - manage plain dm-crypt and LUKS encrypted volumes
 .SH SYNOPSIS
@@ -130,6 +130,36 @@ With LUKS2 device additional \fB<options>\fR can be [\-\-token\-id, \-\-token\-o
 \-\-key\-slot, \-\-key\-file, \-\-keyfile\-size, \-\-keyfile\-offset, \-\-timeout,
 \-\-disable\-locks, \-\-disable\-keyring].
 
+.PP
+\fIrefresh\fR <name>
+.IP
+Refreshes parameters of active mapping <name>.
+
+Updates parameters of active device <name> without need to deactivate the device
+(and umount filesystem). Currently it supports parameters refresh on following
+devices: LUKS1, LUKS2 (including authenticated encryption), plain crypt
+and loopaes.
+
+Mandatory parametrs are identical to those of an open action for respective
+device type.
+
+You may change following parameters on all devices \-\-perf\-same_cpu_crypt,
+\-\-perf\-submit_from_crypt_cpus and \-\-allow\-discards.
+
+Refreshing device without any optional parameter will refresh the device
+with default setting (respective to device type).
+
+\fBLUKS2 only:\fR
+
+\-\-integrity\-no\-journal parameter affects only LUKS2 devices with
+underlying dm-integrity device.
+
+Adding option \-\-persistent stores any combination of device parameters
+above in LUKS2 metadata (only after successful refresh operation).
+
+\-\-disable\-keyring parameter refreshes a device with volume key passed
+in dm-crypt driver.
+
 .SH PLAIN MODE
 Plain dm-crypt encrypts the device sector-by-sector with a
 single, non-salted hash of the passphrase. No checks
@@ -148,7 +178,8 @@ Opens (creates a mapping with) <name> backed by device <device>.
 
 \fB<options>\fR can be [\-\-hash, \-\-cipher, \-\-verify-passphrase,
 \-\-sector\-size, \-\-key-file, \-\-keyfile-offset, \-\-key-size,
-\-\-offset, \-\-skip, \-\-size, \-\-readonly, \-\-shared, \-\-allow\-discards]
+\-\-offset, \-\-skip, \-\-size, \-\-readonly, \-\-shared, \-\-allow\-discards,
+\-\-refresh]
 
 Example: 'cryptsetup open \-\-type plain /dev/sda10 e1' maps the raw
 encrypted device /dev/sda10 to the mapped (decrypted) device
@@ -223,7 +254,9 @@ For LUKS2, additional \fB<options>\fR can be
 [\-\-integrity, \-\-integrity\-no\-wipe, \-\-sector\-size,
 \-\-label, \-\-subsystem,
 \-\-pbkdf, \-\-pbkdf\-memory, \-\-pbkdf\-parallel,
-\-\-disable\-locks, \-\-disable\-keyring].
+\-\-disable\-locks, \-\-disable\-keyring,
+\-\-luks2\-metadata\-size, \-\-luks2\-keyslots\-size,
+\-\-keyslot\-cipher, \-\-keyslot\-key\-size].
 
 \fBWARNING:\fR Doing a luksFormat on an existing LUKS container will
 make all data the old container permanently irretrievable unless
@@ -243,7 +276,7 @@ the command prompts for it interactively.
 \fB<options>\fR can be [\-\-key\-file, \-\-keyfile\-offset,
 \-\-keyfile\-size, \-\-readonly, \-\-test\-passphrase,
 \-\-allow\-discards, \-\-header, \-\-key-slot, \-\-master\-key\-file, \-\-token\-id,
-\-\-token\-only, \-\-disable\-keyring, \-\-disable\-locks, \-\-type].
+\-\-token\-only, \-\-disable\-keyring, \-\-disable\-locks, \-\-type, \-\-refresh].
 .PP
 \fIluksSuspend\fR <name>
 .IP
@@ -285,7 +318,7 @@ is not required.
 \-\-keyfile\-size, \-\-new\-keyfile\-offset,
 \-\-new\-keyfile\-size, \-\-key\-slot, \-\-master\-key\-file,
 \-\-iter\-time, \-\-force\-password, \-\-header, \-\-disable\-locks,
-\-\-unbound, \-\-type].
+\-\-unbound, \-\-type, \-\-keyslot\-cipher, \-\-keyslot\-key\-size].
 .PP
 \fIluksRemoveKey\fR <device> [<key file with passphrase to be removed>]
 .IP
@@ -328,7 +361,7 @@ inaccessible.
 \fB<options>\fR can be [\-\-key\-file, \-\-keyfile\-offset,
 \-\-keyfile\-size, \-\-new\-keyfile\-offset,
 \-\-new\-keyfile\-size, \-\-key\-slot, \-\-force\-password, \-\-header,
-\-\-disable\-locks, \-\-type].
+\-\-disable\-locks, \-\-type, \-\-keyslot\-cipher, \-\-keyslot\-key\-size].
 .PP
 .PP
 \fIluksConvertKey\fR <device>
@@ -352,7 +385,8 @@ parameters have been wiped and make the LUKS container inaccessible.
 \fB<options>\fR can be [\-\-key\-file, \-\-keyfile\-offset,
 \-\-keyfile\-size, \-\-key\-slot, \-\-header, \-\-disable\-locks,
 \-\-iter-time, \-\-pbkdf, \-\-pbkdf\-force\-iterations,
-\-\-pbkdf\-memory, \-\-pbkdf\-parallel].
+\-\-pbkdf\-memory, \-\-pbkdf\-parallel,
+\-\-keyslot\-cipher, \-\-keyslot\-key\-size].
 .PP
 \fIluksKillSlot\fR <device> <key slot number>
 .IP
@@ -551,7 +585,7 @@ passphrase hashing (otherwise it is detected according to key
 size).
 
 \fB<options>\fR can be [\-\-key\-file, \-\-key\-size, \-\-offset, \-\-skip,
-\-\-hash, \-\-readonly, \-\-allow\-discards].
+\-\-hash, \-\-readonly, \-\-allow\-discards, \-\-refresh].
 .PP
 See also section 7 of the FAQ and \fBhttp://loop-aes.sourceforge.net\fR
 for more information regarding loop-AES.
@@ -706,9 +740,10 @@ If you are configuring kernel yourself, enable
 .B "\-\-verbose, \-v"
 Print more information on command execution.
 .TP
-.B "\-\-debug"
+.B "\-\-debug or \-\-debug\-json"
 Run in debug mode with full diagnostic logs. Debug output
 lines are always prefixed by '#'.
+If \-\-debug\-json is used, additional LUKS2 JSON data structures are printed.
 .TP
 .B "\-\-type <device-type>
 Specifies required device type, for more info
@@ -892,7 +927,11 @@ actions.
 .B "\-\-offset, \-o <number of 512 byte sectors>"
 Start offset in the backend device in 512-byte sectors.
 This option is only relevant for the \fIopen\fR action with plain
-or loopaes device types.
+or loopaes device types or for LUKS devices in \fIluksFormat\fR.
+
+For LUKS, the \-\-offset option sets the data offset (payload) of data
+device and must be be aligned to 4096-byte sectors (must be multiple of 8).
+This option cannot be combined with \-\-align\-payload option.
 .TP
 .B "\-\-skip, \-p <number of 512 byte sectors>"
 Start offset used in IV calculation in 512-byte sectors
@@ -1014,6 +1053,11 @@ data is by default aligned to a 1MiB boundary (i.e. 2048 512-byte sectors).
 
 For a detached LUKS header, this option specifies the offset on the
 data device. See also the \-\-header option.
+
+\fBWARNING:\fR This option is DEPRECATED and has often unexpected impact
+to the data offset and keyslot area size (for LUKS2) due to the complex rounding.
+For fixed data device offset use \fI\-\-offset\fR option instead.
+
 .TP
 .B "\-\-uuid=\fIUUID\fR"
 Use the provided \fIUUID\fR for the \fIluksFormat\fR command
@@ -1164,6 +1208,10 @@ Only \fI\-\-allow-discards\fR, \fI\-\-perf\-same_cpu_crypt\fR,
 \fI\-\-perf\-submit_from_crypt_cpus\fR and \fI\-\-integrity\-no\-journal\fR
 can be stored persistently.
 .TP
+.B "\-\-refresh"
+Refreshes an active device with new set of parameters. See action \fIrefresh\fR description
+for more details.
+.TP
 .B "\-\-label <LABEL>"
 .B "\-\-subsystem <SUBSYSTEM>"
 Set label and subsystem description for LUKS2 device, can be used
@@ -1180,6 +1228,26 @@ For native AEAD modes, also enable "User-space interface for AEAD cipher algorit
 in "Cryptographic API" section (CONFIG_CRYPTO_USER_API_AEAD .config option).
 
 For more info, see \fIAUTHENTICATED DISK ENCRYPTION\fR section.
+.TP
+.B "\-\-luks2\-metadata\-size <size>"
+This option can be used to enlarge the LUKS2 metadata (JSON) area.
+The size includes 4096 bytes for binary metadata (usable JSON area is smaller
+of the binary area).
+According to LUKS2 specification, only these values are valid:
+16, 32, 64, 128, 256, 512, 1024, 2048 and 4096 kB
+The <size> can be specified with unit suffix (for example 128k).
+.TP
+.B "\-\-luks2\-keyslots\-size <size>"
+This option can be used to set specific size of the LUKS2 binary keyslot area
+(key material is encrypted there). The value must be aligned to multiple
+of 4096 bytes with maximum size 128MB.
+The <size> can be specified with unit suffix (for example 128k).
+.TP
+.B "\-\-keyslot\-cipher <cipher\-spec>"
+This option can be used to set specific cipher encryption for the LUKS2 keyslot area.
+.TP
+.B "\-\-keyslot\-key\-size <bits>"
+This option can be used to set specific key size for the LUKS2 keyslot area.
 .TP
 .B "\-\-integrity\-no\-journal"
 Activate device with integrity protection without using data journal (direct
@@ -1446,11 +1514,11 @@ Copyright \(co 2004 Jana Saout
 .br
 Copyright \(co 2004-2006 Clemens Fruhwirth
 .br
-Copyright \(co 2009-2018 Red Hat, Inc.
-.br
-Copyright \(co 2009-2018 Milan Broz
-.br
 Copyright \(co 2012-2014 Arno Wagner
+.br
+Copyright \(co 2009-2019 Red Hat, Inc.
+.br
+Copyright \(co 2009-2019 Milan Broz
 
 This is free software; see the source for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.

@@ -1,10 +1,10 @@
 /*
  * libcryptsetup - cryptsetup library internal
  *
- * Copyright (C) 2004, Jana Saout <jana@saout.de>
- * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2018, Milan Broz
+ * Copyright (C) 2004 Jana Saout <jana@saout.de>
+ * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -65,6 +65,13 @@
 # define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
 
+#define MOVE_REF(x, y) \
+	do { \
+		typeof (x) *_px = &(x), *_py = &(y); \
+		*_px = *_py; \
+		*_py = NULL; \
+	} while (0)
+
 struct crypt_device;
 
 struct volume_key {
@@ -87,38 +94,43 @@ int verify_pbkdf_params(struct crypt_device *cd,
 int crypt_benchmark_pbkdf_internal(struct crypt_device *cd,
 				   struct crypt_pbkdf_type *pbkdf,
 				   size_t volume_key_size);
+const char *crypt_get_cipher_spec(struct crypt_device *cd);
 
 /* Device backend */
 struct device;
-int device_alloc(struct device **device, const char *path);
+int device_alloc(struct crypt_device *cd, struct device **device, const char *path);
 int device_alloc_no_check(struct device **device, const char *path);
-void device_free(struct device *device);
+void device_free(struct crypt_device *cd, struct device *device);
 const char *device_path(const struct device *device);
 const char *device_dm_name(const struct device *device);
 const char *device_block_path(const struct device *device);
-void device_topology_alignment(struct device *device,
-			    unsigned long *required_alignment, /* bytes */
-			    unsigned long *alignment_offset,   /* bytes */
-			    unsigned long default_alignment);
-size_t device_block_size(struct device *device);
+void device_topology_alignment(struct crypt_device *cd,
+			       struct device *device,
+			       unsigned long *required_alignment, /* bytes */
+			       unsigned long *alignment_offset,   /* bytes */
+			       unsigned long default_alignment);
+size_t device_block_size(struct crypt_device *cd, struct device *device);
 int device_read_ahead(struct device *device, uint32_t *read_ahead);
 int device_size(struct device *device, uint64_t *size);
-int device_open(struct device *device, int flags);
+int device_open(struct crypt_device *cd, struct device *device, int flags);
 void device_disable_direct_io(struct device *device);
 int device_is_identical(struct device *device1, struct device *device2);
 int device_is_rotational(struct device *device);
 size_t device_alignment(struct device *device);
 int device_direct_io(const struct device *device);
 int device_fallocate(struct device *device, uint64_t size);
-void device_sync(struct device *device, int devfd);
+void device_sync(struct crypt_device *cd, struct device *device, int devfd);
+int device_check_size(struct crypt_device *cd,
+		      struct device *device,
+		      uint64_t req_offset, int falloc);
 
-int device_open_locked(struct device *device, int flags);
+int device_open_locked(struct crypt_device *cd, struct device *device, int flags);
 int device_read_lock(struct crypt_device *cd, struct device *device);
 int device_write_lock(struct crypt_device *cd, struct device *device);
-void device_read_unlock(struct device *device);
-void device_write_unlock(struct device *device);
+void device_read_unlock(struct crypt_device *cd, struct device *device);
+void device_write_unlock(struct crypt_device *cd, struct device *device);
 
-enum devcheck { DEV_OK = 0, DEV_EXCL = 1, DEV_SHARED = 2 };
+enum devcheck { DEV_OK = 0, DEV_EXCL = 1 };
 int device_check_access(struct crypt_device *cd,
 			struct device *device,
 			enum devcheck device_check);
@@ -129,6 +141,13 @@ int device_block_adjust(struct crypt_device *cd,
 			uint64_t *size,
 			uint32_t *flags);
 size_t size_round_up(size_t size, size_t block);
+
+int create_or_reload_device(struct crypt_device *cd, const char *name,
+		     const char *type, struct crypt_dm_active_device *dmd);
+
+int create_or_reload_device_with_integrity(struct crypt_device *cd, const char *name,
+		     const char *type, struct crypt_dm_active_device *dmd,
+		     struct crypt_dm_active_device *dmdi);
 
 /* Receive backend devices from context helpers */
 struct device *crypt_metadata_device(struct crypt_device *cd);
@@ -152,7 +171,7 @@ uint64_t crypt_getphysmemory_kb(void);
 int init_crypto(struct crypt_device *ctx);
 
 void logger(struct crypt_device *cd, int level, const char *file, int line, const char *format, ...) __attribute__ ((format (printf, 5, 6)));
-#define log_dbg(x...) logger(NULL, CRYPT_LOG_DEBUG, __FILE__, __LINE__, x)
+#define log_dbg(c, x...) logger(c, CRYPT_LOG_DEBUG, __FILE__, __LINE__, x)
 #define log_std(c, x...) logger(c, CRYPT_LOG_NORMAL, __FILE__, __LINE__, x)
 #define log_verbose(c, x...) logger(c, CRYPT_LOG_VERBOSE, __FILE__, __LINE__, x)
 #define log_err(c, x...) logger(c, CRYPT_LOG_ERROR, __FILE__, __LINE__, x)
@@ -169,7 +188,7 @@ int crypt_random_get(struct crypt_device *ctx, char *buf, size_t len, int qualit
 void crypt_random_exit(void);
 int crypt_random_default_key_rng(void);
 
-int crypt_plain_hash(struct crypt_device *ctx,
+int crypt_plain_hash(struct crypt_device *cd,
 		     const char *hash_name,
 		     char *key, size_t key_size,
 		     const char *passphrase, size_t passphrase_size);
@@ -198,7 +217,7 @@ int crypt_get_integrity_tag_size(struct crypt_device *cd);
 int crypt_key_in_keyring(struct crypt_device *cd);
 void crypt_set_key_in_keyring(struct crypt_device *cd, unsigned key_in_keyring);
 int crypt_volume_key_load_in_keyring(struct crypt_device *cd, struct volume_key *vk);
-int crypt_use_keyring_for_vk(const struct crypt_device *cd);
+int crypt_use_keyring_for_vk(struct crypt_device *cd);
 void crypt_drop_keyring_key(struct crypt_device *cd, const char *key_description);
 
 static inline uint64_t version(uint16_t major, uint16_t minor, uint16_t patch, uint16_t release)

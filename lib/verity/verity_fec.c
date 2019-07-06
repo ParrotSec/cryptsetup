@@ -1,8 +1,8 @@
 /*
  * dm-verity Forward Error Correction (FEC) support
  *
- * Copyright (C) 2015, Google, Inc. All rights reserved.
- * Copyright (C) 2017-2018, Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015 Google, Inc. All rights reserved.
+ * Copyright (C) 2017-2019 Red Hat, Inc. All rights reserved.
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -244,7 +244,7 @@ int VERITY_FEC_process(struct crypt_device *cd,
 	}
 
 	if (lseek(fd, params->fec_area_offset, SEEK_SET) < 0) {
-		log_dbg("Cannot seek to requested position in FEC device.");
+		log_dbg(cd, "Cannot seek to requested position in FEC device.");
 		goto out;
 	}
 

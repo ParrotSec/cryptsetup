@@ -1,10 +1,10 @@
 /*
  * cryptsetup - setup cryptographic volumes for dm-crypt
  *
- * Copyright (C) 2004, Jana Saout <jana@saout.de>
- * Copyright (C) 2004-2007, Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2018, Milan Broz
+ * Copyright (C) 2004 Jana Saout <jana@saout.de>
+ * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
+ * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -57,6 +57,7 @@
 #define DEFAULT_WIPE_BLOCK	1048576 /* 1 MiB */
 
 extern int opt_debug;
+extern int opt_debug_json;
 extern int opt_verbose;
 extern int opt_batch_mode;
 extern int opt_force_password;

@@ -18,6 +18,12 @@ PWD3="1-9Qu5Ejfnqv"
 
 MNT_DIR=./mnt_luks
 START_DIR=$(pwd)
+[ -f /etc/system-fips ] && FIPS_MODE=$(cat /proc/sys/crypto/fips_enabled 2>/dev/null)
+
+function fips_mode()
+{
+	[ -n "$FIPS_MODE" ] && [ "$FIPS_MODE" -gt 0 ]
+}
 
 function dm_crypt_features()
 {
@@ -113,13 +119,17 @@ function prepare() # $1 dev1_siz
 	fi
 }
 
-function check_hash_dev() # $1 dev, $2 hash
+function check_hash_dev() # $1 dev, $2 hash, $3 size
 {
-	HASH=$(sha256sum $1 | cut -d' ' -f 1)
+	if [ -n "$3" ]; then
+		HASH=$(head -c $3 $1 | sha256sum | cut -d' ' -f 1)
+	else
+		HASH=$(sha256sum $1 | cut -d' ' -f 1)
+	fi
 	[ $HASH != "$2" ] && fail "HASH differs ($HASH)"
 }
 
-function check_hash() # $1 pwd, $2 hash, $hdr
+function check_hash() # $1 pwd, $2 hash, $3 hdr
 {
 	open_crypt $1 $3
 	check_hash_dev /dev/mapper/$DEV_NAME $2
@@ -209,6 +219,7 @@ function test_logging() {
 [ $(id -u) != 0 ] && skip "WARNING: You must be root to run this test, test skipped."
 [ ! -x "$REENC" ] && skip "Cannot find $REENC, test skipped."
 which wipefs >/dev/null ||  skip "Cannot find wipefs, test skipped."
+fips_mode && skip "This test cannot be run in FIPS mode."
 
 # REENCRYPTION tests
 
@@ -216,10 +227,11 @@ HASH1=b69dae56a14d1a8314ed40664c4033ea0a550eea2673e04df42a66ac6b9faf2c
 HASH4=2daeb1f36095b44b318410b3f4e8b5d989dcc7bb023d1426c492dab0a3053e74
 HASH5=bb9f8df61474d25e71fa00722318cd387396ca1736605e1248821cc0de3d3af8
 HASH6=4d9cbaf3aa0935a8c113f139691b3daf9c94c8d6c278aedc8eec66a4b9f6c8ae
+HASH7=5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef
 
 echo "[1] Reencryption"
 prepare 8192
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 -s 128 -c aes-cbc-plain $FAST_PBKDF_ARGON --align-payload 4096 $IMG || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 -s 128 -c aes-cbc-plain $FAST_PBKDF_ARGON --offset 8192 $IMG || fail
 wipe $PWD1
 check_hash $PWD1 $HASH5
 echo $PWD1 | $REENC $IMG -q $FAST_PBKDF_ARGON
@@ -235,9 +247,16 @@ check_hash $PWD1 $HASH5
 echo $PWD1 | $REENC $IMG -q -s 512 --master-key-file /dev/urandom $FAST_PBKDF_ARGON
 check_hash $PWD1 $HASH5
 $CRYPTSETUP luksDump $IMG | grep -q "luks2" > /dev/null || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 -s 128 --luks2-metadata-size 128k -c aes-cbc-plain $FAST_PBKDF_ARGON --offset 8192 $IMG > /dev/null || fail
+wipe $PWD1
+check_hash $PWD1 $HASH5
+echo $PWD1 | $REENC $IMG -q $FAST_PBKDF_ARGON > /dev/null || fail
+check_hash $PWD1 $HASH5
+MDA_SIZE=$($CRYPTSETUP luksDump $IMG | grep "Metadata area: " | cut -f 3 -d ' ')
+test "$MDA_SIZE" -eq 131072 || fail "Unexpected Metadata area size $MDA_SIZE"
 
 echo "[2] Reencryption with data shift"
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 -c aes-cbc-essiv:sha256 -s 128 $FAST_PBKDF_ARGON --align-payload 2048 $IMG || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 -c aes-cbc-essiv:sha256 -s 128 $FAST_PBKDF_ARGON --offset 8192 $IMG || fail
 wipe $PWD1
 echo $PWD1 | $REENC $IMG -q -s 256 --reduce-device-size 1024S $FAST_PBKDF_ARGON || fail
 check_hash $PWD1 $HASH6
@@ -246,7 +265,7 @@ check_hash $PWD1 $HASH6
 $CRYPTSETUP luksDump $IMG | grep -q "luks2" > /dev/null || fail
 
 echo "[3] Reencryption with keyfile"
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 -d $KEY1 -c aes-cbc-essiv:sha256 -s 128 $FAST_PBKDF_ARGON --align-payload 4096 $IMG || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 -d $KEY1 -c aes-cbc-essiv:sha256 -s 128 $FAST_PBKDF_ARGON --offset 8192 $IMG || fail
 wipe
 check_hash "" $HASH5
 echo $PWD1 | $CRYPTSETUP -q luksAddKey -d $KEY1 $IMG $FAST_PBKDF_ARGON || fail
@@ -263,12 +282,20 @@ echo "[4] Encryption of not yet encrypted device"
 OFFSET=8192 # default LUKS2 header size
 prepare 8192
 check_hash_dev $IMG $HASH4
-echo $PWD1 | $REENC --type luks2 $IMG -c aes-cbc-essiv:sha256 -s 128 --new --reduce-device-size "$OFFSET"S -q $FAST_PBKDF_ARGON
+echo $PWD1 | $REENC --type luks2 $IMG -c aes-cbc-essiv:sha256 -s 128 --new --reduce-device-size "$OFFSET"S -q $FAST_PBKDF_ARGON || fail
 check_hash $PWD1 $HASH5
 $CRYPTSETUP luksDump $IMG | grep -q "luks2" > /dev/null || fail
+# 64MiB + 1 KiB
+prepare 65537
+OFFSET=131072
+check_hash_dev $IMG $HASH7 1024
+echo $PWD1 | $REENC --type luks2 $IMG -c aes-cbc-essiv:sha256 -s 128 --new --reduce-device-size "$OFFSET"S -q $FAST_PBKDF_ARGON || fail
+check_hash $PWD1 $HASH7
+$CRYPTSETUP --type luks2 luksDump $IMG > /dev/null || fail
+prepare 8192
 
 echo "[5] Reencryption using specific keyslot"
-echo $PWD2 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG || fail
+echo $PWD2 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG --offset 8192 || fail
 echo -e "$PWD2\n$PWD1" | $CRYPTSETUP -q luksAddKey $FAST_PBKDF_ARGON -S 1 $IMG || fail
 echo -e "$PWD2\n$PWD2" | $CRYPTSETUP -q luksAddKey $FAST_PBKDF_ARGON -S 2 $IMG || fail
 echo -e "$PWD2\n$PWD1" | $CRYPTSETUP -q luksAddKey $FAST_PBKDF_ARGON -S 3 $IMG || fail
@@ -299,16 +326,16 @@ echo -e "$PWD2\n$PWD1\n$PWD2\n$PWD1\n$PWD2\n$PWD1\n$PWD2\n$PWD3" | $REENC -q $IM
 check_slot 0 1 2 3 4 5 6 22 || fail "All keyslots expected to be enabled"
 
 echo "[7] Reencryption of block devices with different block size"
-add_scsi_device sector_size=512 dev_size_mb=8
+add_scsi_device sector_size=512 dev_size_mb=32
 simple_scsi_reenc "[512 sector]"
-add_scsi_device sector_size=4096 dev_size_mb=8
+add_scsi_device sector_size=4096 dev_size_mb=32
 simple_scsi_reenc "[4096 sector]"
-add_scsi_device sector_size=512 physblk_exp=3 dev_size_mb=8
+add_scsi_device sector_size=512 physblk_exp=3 dev_size_mb=32
 simple_scsi_reenc "[4096/512 sector]"
 echo "[OK]"
 
 echo "[8] Header only reencryption (hash and iteration time)"
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG --offset 8192 || fail
 wipe $PWD1
 check_hash $PWD1 $HASH5
 echo $PWD1 | $REENC $IMG -q --keep-key || fail
@@ -321,14 +348,14 @@ echo $PWD1 | $REENC $IMG -q --keep-key --pbkdf-force-iterations 4 --pbkdf-memory
 check_hash $PWD1 $HASH5
 echo $PWD1 | $REENC $IMG -q --keep-key --pbkdf pbkdf2 --pbkdf-force-iterations 1000 --hash sha512
 check_hash $PWD1 $HASH5
-[ "$($CRYPTSETUP luksDump $IMG | grep -A4 -m1 "0: luks2" | grep PBKDF: | sed -e 's/[[:space:]]\+PBKDF:\ \+//g')" = "pbkdf2" ] || fail
-[ "$($CRYPTSETUP luksDump $IMG | grep -A5 -m1 "0: luks2" | grep Hash:  | sed -e 's/[[:space:]]\+Hash:\ \+//g')" = "sha512" ] || fail
+[ "$($CRYPTSETUP luksDump $IMG | grep -A8 -m1 "0: luks2" | grep PBKDF: | sed -e 's/[[:space:]]\+PBKDF:\ \+//g')" = "pbkdf2" ] || fail
+[ "$($CRYPTSETUP luksDump $IMG | grep -A8 -m1 "0: luks2" | grep Hash:  | sed -e 's/[[:space:]]\+Hash:\ \+//g')" = "sha512" ] || fail
 echo $PWD1 | $REENC $IMG -q --keep-key $FAST_PBKDF_ARGON
 check_hash $PWD1 $HASH5
-[ "$($CRYPTSETUP luksDump $IMG | grep -A4 -m1 "0: luks2" | grep PBKDF:      | sed -e 's/[[:space:]]\+PBKDF:\ \+//g')" = $DEFAULT_ARGON ] || fail
-[ "$($CRYPTSETUP luksDump $IMG | grep -A5 -m1 "0: luks2" | grep "Time cost" | sed -e 's/[[:space:]]\+Time\ cost:\ \+//g')" -eq 4 ] || fail
-[ "$($CRYPTSETUP luksDump $IMG | grep -A6 -m1 "0: luks2" | grep Memory      | sed -e 's/[[[:space:]]\+Memory:\ \+//g')" -eq 32 ] || fail
-[ "$($CRYPTSETUP luksDump $IMG | grep -A7 -m1 "0: luks2" | grep Threads     | sed -e 's/[[[:space:]]\+Threads:\ \+//g')" -eq 1 ] || fail
+[ "$($CRYPTSETUP luksDump $IMG | grep -A8 -m1 "0: luks2" | grep PBKDF:      | sed -e 's/[[:space:]]\+PBKDF:\ \+//g')" = $DEFAULT_ARGON ] || fail
+[ "$($CRYPTSETUP luksDump $IMG | grep -A8 -m1 "0: luks2" | grep "Time cost" | sed -e 's/[[:space:]]\+Time\ cost:\ \+//g')" -eq 4 ] || fail
+[ "$($CRYPTSETUP luksDump $IMG | grep -A8 -m1 "0: luks2" | grep Memory      | sed -e 's/[[[:space:]]\+Memory:\ \+//g')" -eq 32 ] || fail
+[ "$($CRYPTSETUP luksDump $IMG | grep -A8 -m1 "0: luks2" | grep Threads     | sed -e 's/[[[:space:]]\+Threads:\ \+//g')" -eq 1 ] || fail
 echo -e "$PWD1\n$PWD2" | $CRYPTSETUP -q luksAddKey -S21 $FAST_PBKDF_ARGON $IMG || fail
 echo $PWD2 | $REENC -S21 -q --keep-key --pbkdf pbkdf2 --pbkdf-force-iterations 1000 $IMG || fail
 check_hash $PWD2 $HASH5
@@ -336,7 +363,7 @@ check_slot 21 || fail "Only keyslot 21 expected to be enabled"
 $CRYPTSETUP luksDump $IMG | grep -q "luks2" > /dev/null || fail
 
 echo "[9] Test log I/Os on various underlaying block devices"
-echo $PWD2 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG || fail
+echo $PWD2 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG --offset 8192 || fail
 add_scsi_device sector_size=512 dev_size_mb=32
 test_logging "[512 sector]" || fail
 add_scsi_device sector_size=4096 dev_size_mb=32
@@ -346,14 +373,14 @@ test_logging "[4096/512 sector]" || fail
 test_logging_tmpfs || fail
 
 echo "[10] Removal of encryption"
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG --offset 8192 || fail
 wipe $PWD1
 check_hash $PWD1 $HASH5
 echo $PWD1 | $REENC $IMG -q --decrypt
 check_hash_dev $IMG $HASH4
 
 echo "[11] Reencryption with tokens"
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG --offset 8192 || fail
 wipe $PWD1
 check_hash $PWD1 $HASH5
 echo -e "$PWD1\n$PWD2" | $CRYPTSETUP -q luksAddKey -S23 $FAST_PBKDF_ARGON $IMG || fail
@@ -372,7 +399,7 @@ $CRYPTSETUP luksDump $IMG | grep "31: luks2-keyring" >/dev/null || fail
 
 echo "[12] Reencryption with persistent flags"
 dm_crypt_features
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG --offset 8192 || fail
 wipe $PWD1
 check_hash $PWD1 $HASH5
 echo $PWD1 | $CRYPTSETUP open $IMG $DEV_NAME $ALLOW_DISCARDS $PERF_CPU --persistent || fail
@@ -404,7 +431,7 @@ $CRYPTSETUP luksDump $IMG_HDR | grep -q "0: luks2" || fail
 
 echo "[14] Reencryption with unbound keyslot"
 prepare 8192
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_ARGON $IMG --offset 8192 || fail
 echo $PWD2 | $CRYPTSETUP -q luksAddKey -S 3 --unbound --key-size 64 $FAST_PBKDF_ARGON $IMG || fail
 wipe $PWD1
 check_hash $PWD1 $HASH5
@@ -415,13 +442,13 @@ $CRYPTSETUP luksDump $IMG | grep -q "3: luks2 (unbound)" || fail
 
 echo "[15] Reencryption after conversion"
 prepare 8192
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_PBKDF2 $IMG || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF_PBKDF2 $IMG --offset 4096 || fail
 wipe $PWD1
 check_hash $PWD1 $HASH1
 $CRYPTSETUP -q convert --type luks2 $IMG || fail
 echo $PWD1 | $REENC $IMG -q $FAST_PBKDF_PBKDF2 || fail
 check_hash $PWD1 $HASH1
-echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_PBKDF2 $IMG || fail
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks2 $FAST_PBKDF_PBKDF2 $IMG --offset 8192 || fail
 wipe $PWD1
 check_hash $PWD1 $HASH5
 $CRYPTSETUP -q convert --type luks1 $IMG || fail

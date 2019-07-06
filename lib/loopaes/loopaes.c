@@ -1,8 +1,8 @@
 /*
  * loop-AES compatible volume handling
  *
- * Copyright (C) 2011-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2011-2018, Milan Broz
+ * Copyright (C) 2011-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2011-2019 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -137,13 +137,13 @@ int LOOPAES_parse_keyfile(struct crypt_device *cd,
 	unsigned int key_lengths[LOOPAES_KEYS_MAX];
 	unsigned int i, key_index, key_len, offset;
 
-	log_dbg("Parsing loop-AES keyfile of size %zu.", buffer_len);
+	log_dbg(cd, "Parsing loop-AES keyfile of size %zu.", buffer_len);
 
 	if (!buffer_len)
 		return -EINVAL;
 
 	if (keyfile_is_gpg(buffer, buffer_len)) {
-		log_err(cd, _("Detected not yet supported GPG encrypted keyfile.\n"));
+		log_err(cd, _("Detected not yet supported GPG encrypted keyfile."));
 		log_std(cd, _("Please use gpg --decrypt <KEYFILE> | cryptsetup --keyfile=- ...\n"));
 		return -EINVAL;
 	}
@@ -164,7 +164,7 @@ int LOOPAES_parse_keyfile(struct crypt_device *cd,
 			key_lengths[key_index]++;
 		}
 		if (offset == buffer_len) {
-			log_dbg("Unterminated key #%d in keyfile.", key_index);
+			log_dbg(cd, "Unterminated key #%d in keyfile.", key_index);
 			log_err(cd, _("Incompatible loop-AES keyfile detected."));
 			return -EINVAL;
 		}
@@ -177,7 +177,7 @@ int LOOPAES_parse_keyfile(struct crypt_device *cd,
 	key_len = key_lengths[0];
 	for (i = 0; i < key_index; i++)
 		if (!key_lengths[i] || (key_lengths[i] != key_len)) {
-			log_dbg("Unexpected length %d of key #%d (should be %d).",
+			log_dbg(cd, "Unexpected length %d of key #%d (should be %d).",
 				key_lengths[i], i, key_len);
 			key_len = 0;
 			break;
@@ -189,7 +189,7 @@ int LOOPAES_parse_keyfile(struct crypt_device *cd,
 		return -EINVAL;
 	}
 
-	log_dbg("Keyfile: %d keys of length %d.", key_index, key_len);
+	log_dbg(cd, "Keyfile: %d keys of length %d.", key_index, key_len);
 
 	*keys_count = key_index;
 	return hash_keys(cd, vk, hash, keys, key_index,
@@ -203,25 +203,15 @@ int LOOPAES_activate(struct crypt_device *cd,
 		     struct volume_key *vk,
 		     uint32_t flags)
 {
-	char *cipher = NULL;
-	uint32_t req_flags, dmc_flags;
 	int r;
+	uint32_t req_flags, dmc_flags;
+	char *cipher = NULL;
 	struct crypt_dm_active_device dmd = {
-		.target = DM_CRYPT,
-		.size   = 0,
-		.flags  = flags,
-		.data_device = crypt_data_device(cd),
-		.u.crypt  = {
-			.cipher = NULL,
-			.vk     = vk,
-			.offset = crypt_get_data_offset(cd),
-			.iv_offset = crypt_get_iv_offset(cd),
-			.sector_size = crypt_get_sector_size(cd),
-		}
+		.flags = flags,
 	};
 
-	r = device_block_adjust(cd, dmd.data_device, DEV_EXCL,
-				dmd.u.crypt.offset, &dmd.size, &dmd.flags);
+	r = device_block_adjust(cd, crypt_data_device(cd), DEV_EXCL,
+				crypt_get_data_offset(cd), &dmd.size, &dmd.flags);
 	if (r)
 		return r;
 
@@ -235,18 +225,29 @@ int LOOPAES_activate(struct crypt_device *cd,
 	if (r < 0)
 		return -ENOMEM;
 
-	dmd.u.crypt.cipher = cipher;
-	log_dbg("Trying to activate loop-AES device %s using cipher %s.",
-		name, dmd.u.crypt.cipher);
+	r = dm_crypt_target_set(&dmd.segment, 0, dmd.size, crypt_data_device(cd),
+			vk, cipher, crypt_get_iv_offset(cd),
+			crypt_get_data_offset(cd), crypt_get_integrity(cd),
+			crypt_get_integrity_tag_size(cd), crypt_get_sector_size(cd));
 
-	r = dm_create_device(cd, name, CRYPT_LOOPAES, &dmd, 0);
+	if (r) {
+		free(cipher);
+		return r;
+	}
 
-	if (r < 0 && !dm_flags(DM_CRYPT, &dmc_flags) &&
+	log_dbg(cd, "Trying to activate loop-AES device %s using cipher %s.",
+		name, cipher);
+
+	r = dm_create_device(cd, name, CRYPT_LOOPAES, &dmd);
+
+	if (r < 0 && !dm_flags(cd, DM_CRYPT, &dmc_flags) &&
 	    (dmc_flags & req_flags) != req_flags) {
 		log_err(cd, _("Kernel doesn't support loop-AES compatible mapping."));
 		r = -ENOTSUP;
 	}
 
+	dm_targets_free(cd, &dmd);
 	free(cipher);
+
 	return r;
 }

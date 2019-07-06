@@ -1,8 +1,8 @@
 /*
  * Linux kernel userspace API crypto backend implementation
  *
- * Copyright (C) 2010-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2018, Milan Broz
+ * Copyright (C) 2010-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2019 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -48,12 +48,21 @@ struct hash_alg {
 };
 
 static struct hash_alg hash_algs[] = {
-	{ "sha1",      "sha1",   20,  64 },
-	{ "sha256",    "sha256", 32,  64 },
-	{ "sha512",    "sha512", 64, 128 },
-	{ "ripemd160", "rmd160", 20,  64 },
-	{ "whirlpool", "wp512",  64,  64 },
-	{ NULL,        NULL,      0,   0 }
+	{ "sha1",      "sha1",        20,  64 },
+	{ "sha224",    "sha224",      28,  64 },
+	{ "sha256",    "sha256",      32,  64 },
+	{ "sha384",    "sha384",      48, 128 },
+	{ "sha512",    "sha512",      64, 128 },
+	{ "ripemd160", "rmd160",      20,  64 },
+	{ "whirlpool", "wp512",       64,  64 },
+	{ "sha3-224",  "sha3-224",    28, 144 },
+	{ "sha3-256",  "sha3-256",    32, 136 },
+	{ "sha3-384",  "sha3-384",    48, 104 },
+	{ "sha3-512",  "sha3-512",    64,  72 },
+	{ "stribog256","streebog256", 32,  64 },
+	{ "stribog512","streebog512", 64,  64 },
+	{ "sm3",       "sm3",         32,  64 },
+	{ NULL,        NULL,           0,   0 }
 };
 
 struct crypt_hash {
@@ -181,7 +190,7 @@ int crypt_hash_init(struct crypt_hash **ctx, const char *name)
 	}
 	h->hash_len = ha->length;
 
-	strncpy((char *)sa.salg_name, ha->kernel_name, sizeof(sa.salg_name));
+	strncpy((char *)sa.salg_name, ha->kernel_name, sizeof(sa.salg_name)-1);
 
 	if (crypt_kernel_socket_init(&sa, &h->tfmfd, &h->opfd, NULL, 0) < 0) {
 		free(h);

@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2, keyslot handling
  *
- * Copyright (C) 2015-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2018, Milan Broz. All rights reserved.
+ * Copyright (C) 2015-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2019 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -83,11 +83,11 @@ int LUKS2_keyslot_for_segment(struct luks2_hdr *hdr, int keyslot, int segment)
 	if (segment == CRYPT_ANY_SEGMENT)
 		return 0;
 
-	keyslot_digest = LUKS2_digest_by_keyslot(NULL, hdr, keyslot);
+	keyslot_digest = LUKS2_digest_by_keyslot(hdr, keyslot);
 	if (keyslot_digest < 0)
 		return -EINVAL;
 
-	segment_digest = LUKS2_digest_by_segment(NULL, hdr, segment);
+	segment_digest = LUKS2_digest_by_segment(hdr, segment);
 	if (segment_digest < 0)
 		return segment_digest;
 
@@ -111,13 +111,18 @@ int LUKS2_keyslot_active_count(struct luks2_hdr *hdr, int segment)
 	return num;
 }
 
-int LUKS2_keyslot_cipher_incompatible(struct crypt_device *cd)
+int LUKS2_keyslot_cipher_incompatible(struct crypt_device *cd, const char *cipher_spec)
 {
-	const char *cipher = crypt_get_cipher(cd);
-	const char *cipher_mode = crypt_get_cipher_mode(cd);
+	char cipher[MAX_CIPHER_LEN], cipher_mode[MAX_CIPHER_LEN];
+
+	if (!cipher_spec || !strcmp(cipher_spec, "null") || !strcmp(cipher_spec, "cipher_null"))
+		return 1;
+
+	if (crypt_parse_name_and_mode(cipher_spec, cipher, NULL, cipher_mode) < 0)
+		return 1;
 
 	/* Keyslot is already authenticated; we cannot use integrity tags here */
-	if (crypt_get_integrity_tag_size(cd) || !cipher)
+	if (crypt_get_integrity_tag_size(cd))
 		return 1;
 
 	/* Wrapped key schemes cannot be used for keyslot encryption */
@@ -132,45 +137,75 @@ int LUKS2_keyslot_cipher_incompatible(struct crypt_device *cd)
 }
 
 int LUKS2_keyslot_params_default(struct crypt_device *cd, struct luks2_hdr *hdr,
-	size_t key_size, struct luks2_keyslot_params *params)
+				 struct luks2_keyslot_params *params)
 {
-	int r, integrity_key_size = crypt_get_integrity_key_size(cd);
 	const struct crypt_pbkdf_type *pbkdf = crypt_get_pbkdf_type(cd);
+	const char *cipher_spec;
+	size_t key_size;
+	int r;
 
 	if (!hdr || !pbkdf || !params)
 		return -EINVAL;
 
-	params->af_type   = LUKS2_KEYSLOT_AF_LUKS1;
+	/*
+	 * set keyslot area encryption parameters
+	 */
 	params->area_type = LUKS2_KEYSLOT_AREA_RAW;
-
-	/* set keyslot AF parameters */
-	/* currently we use hash for AF from pbkdf settings */
-	r = snprintf(params->af.luks1.hash, sizeof(params->af.luks1.hash),
-		     "%s", pbkdf->hash);
-	if (r < 0 || (size_t)r >= sizeof(params->af.luks1.hash))
+	cipher_spec = crypt_keyslot_get_encryption(cd, CRYPT_ANY_SLOT, &key_size);
+	if (!cipher_spec || !key_size)
 		return -EINVAL;
 
-	params->af.luks1.stripes = 4000;
-
-	/* set keyslot area encryption parameters */
-	/* short circuit authenticated encryption hardcoded defaults */
-	if (LUKS2_keyslot_cipher_incompatible(cd) || key_size == 0) {
-		// FIXME: fixed cipher and key size can be wrong
-		snprintf(params->area.raw.encryption, sizeof(params->area.raw.encryption),
-			 "aes-xts-plain64");
-		params->area.raw.key_size = 32;
-		return 0;
-	}
-
-	r = snprintf(params->area.raw.encryption, sizeof(params->area.raw.encryption),
-		     "%s", LUKS2_get_cipher(hdr, CRYPT_DEFAULT_SEGMENT));
+	params->area.raw.key_size = key_size;
+	r = snprintf(params->area.raw.encryption, sizeof(params->area.raw.encryption), "%s", cipher_spec);
 	if (r < 0 || (size_t)r >= sizeof(params->area.raw.encryption))
 		return -EINVAL;
 
-	/* Slot encryption tries to use the same key size as for the main algorithm */
-	if ((size_t)integrity_key_size > key_size)
+	/*
+	 * set keyslot AF parameters
+	 */
+	params->af_type = LUKS2_KEYSLOT_AF_LUKS1;
+	/* currently we use hash for AF from pbkdf settings */
+	r = snprintf(params->af.luks1.hash, sizeof(params->af.luks1.hash), "%s", pbkdf->hash);
+	if (r < 0 || (size_t)r >= sizeof(params->af.luks1.hash))
 		return -EINVAL;
-	params->area.raw.key_size = key_size - integrity_key_size;
+	params->af.luks1.stripes = 4000;
+
+	return 0;
+}
+
+int LUKS2_keyslot_pbkdf(struct luks2_hdr *hdr, int keyslot, struct crypt_pbkdf_type *pbkdf)
+{
+	json_object *jobj_keyslot, *jobj_kdf, *jobj;
+
+	if (!hdr || !pbkdf)
+		return -EINVAL;
+
+	if (LUKS2_keyslot_info(hdr, keyslot) == CRYPT_SLOT_INVALID)
+		return -EINVAL;
+
+	jobj_keyslot = LUKS2_get_keyslot_jobj(hdr, keyslot);
+	if (!jobj_keyslot)
+		return -ENOENT;
+
+	if (!json_object_object_get_ex(jobj_keyslot, "kdf", &jobj_kdf))
+		return -EINVAL;
+
+	if (!json_object_object_get_ex(jobj_kdf, "type", &jobj))
+		return -EINVAL;
+
+	memset(pbkdf, 0, sizeof(*pbkdf));
+
+	pbkdf->type = json_object_get_string(jobj);
+	if (json_object_object_get_ex(jobj_kdf, "hash", &jobj))
+		pbkdf->hash = json_object_get_string(jobj);
+	if (json_object_object_get_ex(jobj_kdf, "iterations", &jobj))
+		pbkdf->iterations = json_object_get_int(jobj);
+	if (json_object_object_get_ex(jobj_kdf, "time", &jobj))
+		pbkdf->iterations = json_object_get_int(jobj);
+	if (json_object_object_get_ex(jobj_kdf, "memory", &jobj))
+		pbkdf->max_memory_kb = json_object_get_int(jobj);
+	if (json_object_object_get_ex(jobj_kdf, "cpus", &jobj))
+		pbkdf->parallel_threads = json_object_get_int(jobj);
 
 	return 0;
 }
@@ -178,7 +213,7 @@ int LUKS2_keyslot_params_default(struct crypt_device *cd, struct luks2_hdr *hdr,
 static int LUKS2_keyslot_unbound(struct luks2_hdr *hdr, int keyslot)
 {
 	json_object *jobj_digest, *jobj_segments;
-	int digest = LUKS2_digest_by_keyslot(NULL, hdr, keyslot);
+	int digest = LUKS2_digest_by_keyslot(hdr, keyslot);
 
 	if (digest < 0)
 		return 0;
@@ -256,20 +291,20 @@ static int LUKS2_open_and_verify(struct crypt_device *cd,
 
 	r = h->validate(cd, LUKS2_get_keyslot_jobj(hdr, keyslot));
 	if (r) {
-		log_dbg("Keyslot %d validation failed.", keyslot);
+		log_dbg(cd, "Keyslot %d validation failed.", keyslot);
 		return r;
 	}
 
 	r = LUKS2_keyslot_for_segment(hdr, keyslot, segment);
 	if (r) {
 		if (r == -ENOENT)
-			log_dbg("Keyslot %d unusable for segment %d.", keyslot, segment);
+			log_dbg(cd, "Keyslot %d unusable for segment %d.", keyslot, segment);
 		return r;
 	}
 
 	key_size = LUKS2_get_volume_key_size(hdr, segment);
 	if (key_size < 0)
-		key_size = LUKS2_get_keyslot_key_size(hdr, keyslot);
+		key_size = LUKS2_get_keyslot_stored_key_size(hdr, keyslot);
 	if (key_size < 0)
 		return -EINVAL;
 
@@ -279,7 +314,7 @@ static int LUKS2_open_and_verify(struct crypt_device *cd,
 
 	r = h->open(cd, keyslot, password, password_len, (*vk)->key, (*vk)->keylength);
 	if (r < 0)
-		log_dbg("Keyslot %d (%s) open failed with %d.", keyslot, h->name, r);
+		log_dbg(cd, "Keyslot %d (%s) open failed with %d.", keyslot, h->name, r);
 	else
 		r = LUKS2_digest_verify(cd, hdr, *vk, keyslot);
 
@@ -313,7 +348,7 @@ static int LUKS2_keyslot_open_priority(struct crypt_device *cd,
 
 		keyslot = atoi(slot);
 		if (slot_priority != priority) {
-			log_dbg("Keyslot %d priority %d != %d (required), skipped.",
+			log_dbg(cd, "Keyslot %d priority %d != %d (required), skipped.",
 				keyslot, slot_priority, priority);
 			continue;
 		}
@@ -389,14 +424,14 @@ int LUKS2_keyslot_store(struct crypt_device *cd,
 
 		r = h->update(cd, keyslot, params);
 		if (r) {
-			log_dbg("Failed to update keyslot %d json.", keyslot);
+			log_dbg(cd, "Failed to update keyslot %d json.", keyslot);
 			return r;
 		}
 	}
 
 	r = h->validate(cd, LUKS2_get_keyslot_jobj(hdr, keyslot));
 	if (r) {
-		log_dbg("Keyslot validation failed.");
+		log_dbg(cd, "Keyslot validation failed.");
 		return r;
 	}
 
@@ -411,7 +446,6 @@ int LUKS2_keyslot_wipe(struct crypt_device *cd,
 {
 	struct device *device = crypt_metadata_device(cd);
 	uint64_t area_offset, area_length;
-	char num[16];
 	int r;
 	json_object *jobj_keyslot, *jobj_keyslots;
 	const keyslot_handler *h;
@@ -426,7 +460,7 @@ int LUKS2_keyslot_wipe(struct crypt_device *cd,
 		return -ENOENT;
 
 	if (wipe_area_only)
-		log_dbg("Wiping keyslot %d area only.", keyslot);
+		log_dbg(cd, "Wiping keyslot %d area only.", keyslot);
 
 	/* Just check that nobody uses the metadata now */
 	r = device_write_lock(cd, device);
@@ -435,7 +469,7 @@ int LUKS2_keyslot_wipe(struct crypt_device *cd,
 			device_path(device));
 		return r;
 	}
-	device_write_unlock(device);
+	device_write_unlock(cd, device);
 
 	/* secure deletion of possible key material in keyslot area */
 	r = crypt_keyslot_area(cd, keyslot, &area_offset, &area_length);
@@ -466,10 +500,9 @@ int LUKS2_keyslot_wipe(struct crypt_device *cd,
 		if (r < 0)
 			return r;
 	} else
-		log_dbg("Wiping keyslot %d without specific-slot handler loaded.", keyslot);
+		log_dbg(cd, "Wiping keyslot %d without specific-slot handler loaded.", keyslot);
 
-	snprintf(num, sizeof(num), "%d", keyslot);
-	json_object_object_del(jobj_keyslots, num);
+	json_object_object_del_by_uint(jobj_keyslots, keyslot);
 
 	return LUKS2_hdr_write(cd, hdr);
 }
@@ -523,10 +556,9 @@ int placeholder_keyslot_alloc(struct crypt_device *cd,
 	size_t volume_key_len)
 {
 	struct luks2_hdr *hdr;
-	char num[16];
 	json_object *jobj_keyslots, *jobj_keyslot, *jobj_area;
 
-	log_dbg("Allocating placeholder keyslot %d for LUKS1 down conversion.", keyslot);
+	log_dbg(cd, "Allocating placeholder keyslot %d for LUKS1 down conversion.", keyslot);
 
 	if (!(hdr = crypt_get_hdr(cd, CRYPT_LUKS2)))
 		return -EINVAL;
@@ -555,9 +587,7 @@ int placeholder_keyslot_alloc(struct crypt_device *cd,
 	json_object_object_add(jobj_area, "size", json_object_new_uint64(area_length));
 	json_object_object_add(jobj_keyslot, "area", jobj_area);
 
-	snprintf(num, sizeof(num), "%d", keyslot);
-
-	json_object_object_add(jobj_keyslots, num, jobj_keyslot);
+	json_object_object_add_by_uint(jobj_keyslots, keyslot, jobj_keyslot);
 
 	return 0;
 }
@@ -585,7 +615,7 @@ static unsigned LUKS2_get_keyslot_digests_count(json_object *hdr_jobj, int keysl
 }
 
 /* run only on header that passed basic format validation */
-int LUKS2_keyslots_validate(json_object *hdr_jobj)
+int LUKS2_keyslots_validate(struct crypt_device *cd, json_object *hdr_jobj)
 {
 	const keyslot_handler *h;
 	int keyslot;
@@ -597,16 +627,16 @@ int LUKS2_keyslots_validate(json_object *hdr_jobj)
 	json_object_object_foreach(jobj_keyslots, slot, val) {
 		keyslot = atoi(slot);
 		json_object_object_get_ex(val, "type", &jobj_type);
-		h = LUKS2_keyslot_handler_type(NULL, json_object_get_string(jobj_type));
+		h = LUKS2_keyslot_handler_type(cd, json_object_get_string(jobj_type));
 		if (!h)
 			continue;
-		if (h->validate && h->validate(NULL, val)) {
-			log_dbg("Keyslot type %s validation failed on keyslot %d.", h->name, keyslot);
+		if (h->validate && h->validate(cd, val)) {
+			log_dbg(cd, "Keyslot type %s validation failed on keyslot %d.", h->name, keyslot);
 			return -EINVAL;
 		}
 
 		if (!strcmp(h->name, "luks2") && LUKS2_get_keyslot_digests_count(hdr_jobj, keyslot) != 1) {
-			log_dbg("Keyslot %d is not assigned to exactly 1 digest.", keyslot);
+			log_dbg(cd, "Keyslot %d is not assigned to exactly 1 digest.", keyslot);
 			return -EINVAL;
 		}
 	}
@@ -614,7 +644,7 @@ int LUKS2_keyslots_validate(json_object *hdr_jobj)
 	return 0;
 }
 
-void LUKS2_keyslots_repair(json_object *jobj_keyslots)
+void LUKS2_keyslots_repair(struct crypt_device *cd, json_object *jobj_keyslots)
 {
 	const keyslot_handler *h;
 	json_object *jobj_type;
@@ -626,8 +656,8 @@ void LUKS2_keyslots_repair(json_object *jobj_keyslots)
 		    !json_object_is_type(jobj_type, json_type_string))
 			continue;
 
-		h = LUKS2_keyslot_handler_type(NULL, json_object_get_string(jobj_type));
+		h = LUKS2_keyslot_handler_type(cd, json_object_get_string(jobj_type));
 		if (h && h->repair)
-			h->repair(NULL, val);
+			h->repair(cd, val);
 	}
 }

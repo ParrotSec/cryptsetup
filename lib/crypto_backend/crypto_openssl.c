@@ -1,8 +1,8 @@
 /*
  * OPENSSL crypto backend implementation
  *
- * Copyright (C) 2010-2018, Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2018, Milan Broz
+ * Copyright (C) 2010-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2019 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -324,7 +324,7 @@ int crypt_pbkdf(const char *kdf, const char *hash,
 			return -EINVAL;
 
 		if (!PKCS5_PBKDF2_HMAC(password, (int)password_length,
-		    (unsigned char *)salt, (int)salt_length,
+		    (const unsigned char *)salt, (int)salt_length,
 	            (int)iterations, hash_id, (int)key_length, (unsigned char *)key))
 			return -EINVAL;
 		return 0;
