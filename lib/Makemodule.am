@@ -22,7 +22,8 @@ libcryptsetup_la_CPPFLAGS = $(AM_CPPFLAGS) \
 	-I $(top_srcdir)/lib/loopaes		\
 	-I $(top_srcdir)/lib/verity		\
 	-I $(top_srcdir)/lib/tcrypt		\
-	-I $(top_srcdir)/lib/integrity
+	-I $(top_srcdir)/lib/integrity		\
+	-I $(top_srcdir)/lib/bitlk
 
 libcryptsetup_la_DEPENDENCIES = libutils_io.la libcrypto_backend.la lib/libcryptsetup.sym
 
@@ -39,6 +40,7 @@ libcryptsetup_la_LIBADD = \
 	@LIBARGON2_LIBS@	\
 	@JSON_C_LIBS@		\
 	@BLKID_LIBS@		\
+	$(LTLIBICONV)		\
 	libcrypto_backend.la	\
 	libutils_io.la
 
@@ -64,6 +66,9 @@ libcryptsetup_la_SOURCES = \
 	lib/utils_device_locking.c	\
 	lib/utils_device_locking.h	\
 	lib/utils_pbkdf.c		\
+	lib/utils_safe_memory.c		\
+	lib/utils_storage_wrappers.c	\
+	lib/utils_storage_wrappers.h	\
 	lib/libdevmapper.c		\
 	lib/utils_dm.h			\
 	lib/volumekey.c			\
@@ -72,7 +77,7 @@ libcryptsetup_la_SOURCES = \
 	lib/base64.h			\
 	lib/base64.c			\
 	lib/integrity/integrity.h	\
-	lib/integrity/integrity.c       \
+	lib/integrity/integrity.c	\
 	lib/loopaes/loopaes.h		\
 	lib/loopaes/loopaes.c		\
 	lib/tcrypt/tcrypt.h		\
@@ -88,7 +93,7 @@ libcryptsetup_la_SOURCES = \
 	lib/verity/verity.h		\
 	lib/verity/rs_encode_char.c	\
 	lib/verity/rs_decode_char.c	\
-	lib/verity/rs.h                 \
+	lib/verity/rs.h		\
 	lib/luks2/luks2_disk_metadata.c	\
 	lib/luks2/luks2_json_format.c	\
 	lib/luks2/luks2_json_metadata.c	\
@@ -97,9 +102,14 @@ libcryptsetup_la_SOURCES = \
 	lib/luks2/luks2_digest_pbkdf2.c	\
 	lib/luks2/luks2_keyslot.c	\
 	lib/luks2/luks2_keyslot_luks2.c	\
+	lib/luks2/luks2_keyslot_reenc.c	\
+	lib/luks2/luks2_reencrypt.c	\
+	lib/luks2/luks2_segment.c	\
 	lib/luks2/luks2_token_keyring.c	\
 	lib/luks2/luks2_token.c		\
 	lib/luks2/luks2_internal.h	\
 	lib/luks2/luks2.h		\
 	lib/utils_blkid.c		\
-	lib/utils_blkid.h
+	lib/utils_blkid.h		\
+	lib/bitlk/bitlk.h		\
+	lib/bitlk/bitlk.c

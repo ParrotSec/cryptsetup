@@ -2,7 +2,8 @@
 #
 # Test mode compatibility, check input + kernel and cryptsetup cipher status
 #
-CRYPTSETUP=../cryptsetup
+[ -z "$CRYPTSETUP_PATH" ] && CRYPTSETUP_PATH=".."
+CRYPTSETUP=$CRYPTSETUP_PATH/cryptsetup
 DEV_NAME=dmc_test
 HEADER_IMG=mode-test.img
 PASSWORD=3xrododenron
@@ -17,7 +18,7 @@ LOOPDEV=$(losetup -f 2>/dev/null)
 
 dmremove() { # device
 	udevadm settle >/dev/null 2>&1
-	dmsetup remove $1 >/dev/null 2>&1
+	dmsetup remove --retry $1 >/dev/null 2>&1
 }
 
 cleanup() {
@@ -33,7 +34,8 @@ cleanup() {
 fail()
 {
 	[ -n "$1" ] && echo "$1"
-	echo "FAILED at line $(caller)"
+	echo "FAILED backtrace:"
+	while caller $frame; do ((frame++)); done
 	cleanup
 	exit 100
 }
@@ -114,14 +116,14 @@ dmcrypt()
 	echo $PASSWORD | $CRYPTSETUP luksFormat --type luks1 -i 1 -c $1 -s 256 /dev/mapper/$DEV_NAME >/dev/null 2>&1
 	if [ $? -eq 0 ] ; then
 		echo -n -e " LUKS1:"
-		echo $PASSWORD | $CRYPTSETUP luksOpen /dev/mapper/$DEV_NAME "$DEV_NAME"_tstdev >/dev/null 2>&1
+		echo $PASSWORD | $CRYPTSETUP luksOpen /dev/mapper/$DEV_NAME "$DEV_NAME"_tstdev >/dev/null 2>&1 || fail
 		dmcrypt_check "$DEV_NAME"_tstdev $OUT
 	fi
 
-	echo $PASSWORD | $CRYPTSETUP luksFormat --type luks2 --pbkdf pbkdf2 -i 1 -c $1 -s 256 /dev/mapper/$DEV_NAME >/dev/null 2>&1
+	echo $PASSWORD | $CRYPTSETUP luksFormat --type luks2 --pbkdf pbkdf2 -i 1 -c $1 -s 256 --offset 8192 /dev/mapper/$DEV_NAME >/dev/null 2>&1
 	if [ $? -eq 0 ] ; then
 		echo -n -e " LUKS2:"
-		echo $PASSWORD | $CRYPTSETUP luksOpen /dev/mapper/$DEV_NAME "$DEV_NAME"_tstdev >/dev/null 2>&1
+		echo $PASSWORD | $CRYPTSETUP luksOpen /dev/mapper/$DEV_NAME "$DEV_NAME"_tstdev >/dev/null 2>&1 || fail
 		dmcrypt_check "$DEV_NAME"_tstdev $OUT
 	fi
 

@@ -1,17 +1,34 @@
 #!/bin/bash
 
+[ -z "$CRYPTSETUP_PATH" ] && CRYPTSETUP_PATH=".."
+
+function pversion() {
+	if [ ! -x $CRYPTSETUP_PATH/$1 ] ; then
+		return
+	fi
+
+	echo -n "$CRYPTSETUP_PATH/"
+	$CRYPTSETUP_PATH/$1 --version
+}
+
 echo "Cryptsetup test environment ($(date))"
 uname -a
+if [ "$(cat /proc/sys/crypto/fips_enabled 2>/dev/null)" = "1" ] ; then
+	echo "Kernel running in FIPS mode."
+fi
 
 if [ -f /etc/os-release ] ; then
 	source /etc/os-release
 	echo "$PRETTY_NAME ($NAME) $VERSION"
 fi
 
-[ -x ../cryptsetup ] && ../cryptsetup --version
-[ -x ../veritysetup ] && ../veritysetup --version
-[ -x ../integritysetup ] && ../integritysetup --version
-[ -x ../cryptsetup-reencrypt ] && ../cryptsetup-reencrypt --version
+echo "Memory"
+free -h
+
+pversion cryptsetup
+pversion veritysetup
+pversion integritysetup
+pversion cryptsetup-reencrypt
 
 [ $(id -u) != 0 ] && exit 77
 

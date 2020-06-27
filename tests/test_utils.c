@@ -1,8 +1,8 @@
 /*
  * cryptsetup library API test utilities
  *
- * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2019 Milan Broz
+ * Copyright (C) 2009-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -29,6 +29,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#ifdef KERNEL_KEYRING
+# include <linux/keyctl.h>
+# include <sys/syscall.h>
+#endif
 #ifdef HAVE_SYS_SYSMACROS_H
 # include <sys/sysmacros.h>
 #endif
@@ -58,6 +62,15 @@ void register_cleanup(void (*cleanup)(void))
 void check_ok(int status, int line, const char *func)
 {
 	if (status) {
+		printf("FAIL line %d [%s]: code %d, %s\n", line, func, status, last_error);
+		_cleanup();
+		exit(-1);
+	}
+}
+
+void check_ok_return(int status, int line, const char *func)
+{
+	if (status < 0) {
 		printf("FAIL line %d [%s]: code %d, %s\n", line, func, status, last_error);
 		_cleanup();
 		exit(-1);
@@ -258,7 +271,7 @@ void global_log_callback(int level, const char *msg, void *usrptr)
 
 	if (_debug) {
 		if (level == CRYPT_LOG_DEBUG)
-			fprintf(stdout, "# %s\n", msg);
+			fprintf(stdout, "# %s", msg);
 		else
 			fprintf(stdout, "%s", msg);
 	}
@@ -292,6 +305,15 @@ int _system(const char *command, int warn)
 	if ((r=system(command)) < 0 && warn)
 		printf("System command failed: %s", command);
 	return r;
+}
+
+static int keyring_check(void)
+{
+#ifdef KERNEL_KEYRING
+	return syscall(__NR_request_key, "logon", "dummy", NULL, 0) == -1l && errno != ENOSYS;
+#else
+	return 0;
+#endif
 }
 
 static int t_dm_satisfies_version(unsigned target_maj, unsigned target_min, unsigned target_patch,
@@ -340,7 +362,7 @@ static void t_dm_set_crypt_compat(const char *dm_version, unsigned crypt_maj,
 		t_dm_crypt_flags |= T_DM_SUBMIT_FROM_CRYPT_CPUS_SUPPORTED;
 	}
 
-	if (t_dm_satisfies_version(1, 18, 1, crypt_maj, crypt_min, crypt_patch))
+	if (t_dm_satisfies_version(1, 18, 1, crypt_maj, crypt_min, crypt_patch) && keyring_check())
 		t_dm_crypt_flags |= T_DM_KERNEL_KEYRING_SUPPORTED;
 }
 

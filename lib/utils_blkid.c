@@ -1,7 +1,7 @@
 /*
  * blkid probe utilities
  *
- * Copyright (C) 2018-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2018-2020 Red Hat, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -306,4 +306,18 @@ int blk_supported(void)
 	r = 1;
 #endif
 	return r;
+}
+
+off_t blk_get_offset(struct blkid_handle *h)
+{
+	off_t offset_value = -1;
+#ifdef HAVE_BLKID
+	const char *offset;
+	if (blk_is_superblock(h)) {
+		if (!blkid_probe_lookup_value(h->pr, "SBMAGIC_OFFSET", &offset, NULL))
+			offset_value = strtoll(offset, NULL, 10);
+	} else if (blk_is_partition(h) && !blkid_probe_lookup_value(h->pr, "PTMAGIC_OFFSET", &offset, NULL))
+		offset_value = strtoll(offset, NULL, 10);
+#endif
+	return offset_value;
 }

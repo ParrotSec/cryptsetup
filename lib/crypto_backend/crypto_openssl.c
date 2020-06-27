@@ -1,8 +1,8 @@
 /*
  * OPENSSL crypto backend implementation
  *
- * Copyright (C) 2010-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2010-2019 Milan Broz
+ * Copyright (C) 2010-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -33,7 +33,9 @@
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/rand.h>
-#include "crypto_backend.h"
+#include "crypto_backend_internal.h"
+
+#define CONST_CAST(x) (x)(uintptr_t)
 
 static int crypto_backend_initialised = 0;
 
@@ -47,6 +49,18 @@ struct crypt_hmac {
 	HMAC_CTX *md;
 	const EVP_MD *hash_id;
 	int hash_len;
+};
+
+struct crypt_cipher {
+	bool use_kernel;
+	union {
+	struct crypt_cipher_kernel kernel;
+	struct {
+		EVP_CIPHER_CTX *hd_enc;
+		EVP_CIPHER_CTX *hd_dec;
+		size_t iv_length;
+	} lib;
+	} u;
 };
 
 /*
@@ -107,7 +121,7 @@ static const char *openssl_backend_version(void)
 }
 #endif
 
-int crypt_backend_init(struct crypt_device *ctx)
+int crypt_backend_init(void)
 {
 	if (crypto_backend_initialised)
 		return 0;
@@ -334,4 +348,199 @@ int crypt_pbkdf(const char *kdf, const char *hash,
 	}
 
 	return -EINVAL;
+}
+
+/* Block ciphers */
+static void _cipher_destroy(EVP_CIPHER_CTX **hd_enc, EVP_CIPHER_CTX **hd_dec)
+{
+	EVP_CIPHER_CTX_free(*hd_enc);
+	*hd_enc = NULL;
+
+	EVP_CIPHER_CTX_free(*hd_dec);
+	*hd_dec = NULL;
+}
+
+static int _cipher_init(EVP_CIPHER_CTX **hd_enc, EVP_CIPHER_CTX **hd_dec, const char *name,
+			const char *mode, const void *key, size_t key_length, size_t *iv_length)
+{
+	char cipher_name[256];
+	const EVP_CIPHER *type;
+	int r, key_bits;
+
+	key_bits = key_length * 8;
+	if (!strcmp(mode, "xts"))
+		key_bits /= 2;
+
+	r = snprintf(cipher_name, sizeof(cipher_name), "%s-%d-%s", name, key_bits, mode);
+	if (r < 0 || r >= (int)sizeof(cipher_name))
+		return -EINVAL;
+
+	type = EVP_get_cipherbyname(cipher_name);
+	if (!type)
+		return -ENOENT;
+
+	if (EVP_CIPHER_key_length(type) != (int)key_length)
+		return -EINVAL;
+
+	*hd_enc = EVP_CIPHER_CTX_new();
+	*hd_dec = EVP_CIPHER_CTX_new();
+	*iv_length = EVP_CIPHER_iv_length(type);
+
+	if (!*hd_enc || !*hd_dec)
+		return -EINVAL;
+
+	if (EVP_EncryptInit_ex(*hd_enc, type, NULL, key, NULL) != 1 ||
+	    EVP_DecryptInit_ex(*hd_dec, type, NULL, key, NULL) != 1) {
+		_cipher_destroy(hd_enc, hd_dec);
+		return -EINVAL;
+	}
+
+	if (EVP_CIPHER_CTX_set_padding(*hd_enc, 0) != 1 ||
+	    EVP_CIPHER_CTX_set_padding(*hd_dec, 0) != 1) {
+		_cipher_destroy(hd_enc, hd_dec);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
+		    const char *mode, const void *key, size_t key_length)
+{
+	struct crypt_cipher *h;
+	int r;
+
+	h = malloc(sizeof(*h));
+	if (!h)
+		return -ENOMEM;
+
+	if (!_cipher_init(&h->u.lib.hd_enc, &h->u.lib.hd_dec, name, mode, key,
+			  key_length, &h->u.lib.iv_length)) {
+		h->use_kernel = false;
+		*ctx = h;
+		return 0;
+	}
+
+	r = crypt_cipher_init_kernel(&h->u.kernel, name, mode, key, key_length);
+	if (r < 0) {
+		free(h);
+		return r;
+	}
+
+	h->use_kernel = true;
+	*ctx = h;
+	return 0;
+}
+
+void crypt_cipher_destroy(struct crypt_cipher *ctx)
+{
+	if (ctx->use_kernel)
+		crypt_cipher_destroy_kernel(&ctx->u.kernel);
+	else
+		_cipher_destroy(&ctx->u.lib.hd_enc, &ctx->u.lib.hd_dec);
+	free(ctx);
+}
+
+static int _cipher_encrypt(struct crypt_cipher *ctx, const unsigned char *in, unsigned char *out,
+			   int length, const unsigned char *iv, size_t iv_length)
+{
+	int len;
+
+	if (ctx->u.lib.iv_length != iv_length)
+		return -EINVAL;
+
+	if (EVP_EncryptInit_ex(ctx->u.lib.hd_enc, NULL, NULL, NULL, iv) != 1)
+		return -EINVAL;
+
+	if (EVP_EncryptUpdate(ctx->u.lib.hd_enc, out, &len, in, length) != 1)
+		return -EINVAL;
+
+	if (EVP_EncryptFinal(ctx->u.lib.hd_enc, out + len, &len) != 1)
+		return -EINVAL;
+
+	return 0;
+}
+
+static int _cipher_decrypt(struct crypt_cipher *ctx, const unsigned char *in, unsigned char *out,
+			   int length, const unsigned char *iv, size_t iv_length)
+{
+	int len;
+
+	if (ctx->u.lib.iv_length != iv_length)
+		return -EINVAL;
+
+	if (EVP_DecryptInit_ex(ctx->u.lib.hd_dec, NULL, NULL, NULL, iv) != 1)
+		return -EINVAL;
+
+	if (EVP_DecryptUpdate(ctx->u.lib.hd_dec, out, &len, in, length) != 1)
+		return -EINVAL;
+
+	if (EVP_DecryptFinal(ctx->u.lib.hd_dec, out + len, &len) != 1)
+		return -EINVAL;
+
+	return 0;
+}
+
+int crypt_cipher_encrypt(struct crypt_cipher *ctx,
+			 const char *in, char *out, size_t length,
+			 const char *iv, size_t iv_length)
+{
+	if (ctx->use_kernel)
+		return crypt_cipher_encrypt_kernel(&ctx->u.kernel, in, out, length, iv, iv_length);
+
+	return _cipher_encrypt(ctx, (const unsigned char*)in,
+			       (unsigned char *)out, length, (const unsigned char*)iv, iv_length);
+}
+
+int crypt_cipher_decrypt(struct crypt_cipher *ctx,
+			 const char *in, char *out, size_t length,
+			 const char *iv, size_t iv_length)
+{
+	if (ctx->use_kernel)
+		return crypt_cipher_decrypt_kernel(&ctx->u.kernel, in, out, length, iv, iv_length);
+
+	return _cipher_decrypt(ctx, (const unsigned char*)in,
+			       (unsigned char *)out, length, (const unsigned char*)iv, iv_length);
+}
+
+bool crypt_cipher_kernel_only(struct crypt_cipher *ctx)
+{
+	return ctx->use_kernel;
+}
+
+int crypt_bitlk_decrypt_key(const void *key, size_t key_length,
+			    const char *in, char *out, size_t length,
+			    const char *iv, size_t iv_length,
+			    const char *tag, size_t tag_length)
+{
+#ifdef EVP_CTRL_CCM_SET_IVLEN
+	EVP_CIPHER_CTX *ctx;
+	int len = 0, r = -EINVAL;
+
+	ctx = EVP_CIPHER_CTX_new();
+	if (!ctx)
+		return -EINVAL;
+
+	if (EVP_DecryptInit_ex(ctx, EVP_aes_256_ccm(), NULL, NULL, NULL) != 1)
+		goto out;
+
+	//EVP_CIPHER_CTX_key_length(ctx)
+	//EVP_CIPHER_CTX_iv_length(ctx)
+
+	if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_IVLEN, iv_length, NULL) != 1)
+		goto out;
+	if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_CCM_SET_TAG, tag_length, CONST_CAST(void*)tag) != 1)
+		goto out;
+
+	if (EVP_DecryptInit_ex(ctx, NULL, NULL, key, (const unsigned char*)iv) != 1)
+		goto out;
+
+	if (EVP_DecryptUpdate(ctx, (unsigned char*)out, &len, (const unsigned char*)in, length) == 1)
+		r = 0;
+out:
+	EVP_CIPHER_CTX_free(ctx);
+	return r;
+#else
+	return -ENOTSUP;
+#endif
 }

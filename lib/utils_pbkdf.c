@@ -1,8 +1,8 @@
 /*
  * utils_pbkdf - PBKDF settings for libcryptsetup
  *
- * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2019 Milan Broz
+ * Copyright (C) 2009-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -181,7 +181,7 @@ int init_pbkdf_type(struct crypt_device *cd,
 
 	if (crypt_fips_mode()) {
 		if (pbkdf && strcmp(pbkdf->type, CRYPT_KDF_PBKDF2)) {
-			log_err(cd, "Only PBKDF2 is supported in FIPS mode.");
+			log_err(cd, _("Only PBKDF2 is supported in FIPS mode."));
 			return -EINVAL;
 		}
 		if (!pbkdf)
@@ -258,9 +258,13 @@ int init_pbkdf_type(struct crypt_device *cd,
 		}
 	}
 
-	log_dbg(cd, "PBKDF %s, hash %s, time_ms %u (iterations %u), max_memory_kb %u, parallel_threads %u.",
-		cd_pbkdf->type ?: "(none)", cd_pbkdf->hash ?: "(none)", cd_pbkdf->time_ms,
-		cd_pbkdf->iterations, cd_pbkdf->max_memory_kb, cd_pbkdf->parallel_threads);
+	if (!strcmp(pbkdf->type, CRYPT_KDF_PBKDF2))
+		log_dbg(cd, "PBKDF %s-%s, time_ms %u (iterations %u).",
+			cd_pbkdf->type, cd_pbkdf->hash, cd_pbkdf->time_ms, cd_pbkdf->iterations);
+	else
+		log_dbg(cd, "PBKDF %s, time_ms %u (iterations %u), max_memory_kb %u, parallel_threads %u.",
+			cd_pbkdf->type, cd_pbkdf->time_ms, cd_pbkdf->iterations,
+			cd_pbkdf->max_memory_kb, cd_pbkdf->parallel_threads);
 
 	return 0;
 }

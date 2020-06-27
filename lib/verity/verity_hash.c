@@ -1,7 +1,7 @@
 /*
  * dm-verity volume handling
  *
- * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2020 Red Hat, Inc. All rights reserved.
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -102,7 +102,7 @@ static int hash_levels(size_t hash_block_size, size_t digest_size,
 		       off_t *hash_level_block, off_t *hash_level_size)
 {
 	size_t hash_per_block_bits;
-	off_t s;
+	off_t s, s_shift;
 	int i;
 
 	if (!digest_size)
@@ -124,7 +124,10 @@ static int hash_levels(size_t hash_block_size, size_t digest_size,
 		if (hash_level_block)
 			hash_level_block[i] = *hash_position;
 		// verity position of block data_file_blocks at level i
-		s = (data_file_blocks + ((off_t)1 << ((i + 1) * hash_per_block_bits)) - 1) >> ((i + 1) * hash_per_block_bits);
+		s_shift = (i + 1) * hash_per_block_bits;
+		if (s_shift > 63)
+			return -EINVAL;
+		s = (data_file_blocks + ((off_t)1 << s_shift) - 1) >> ((i + 1) * hash_per_block_bits);
 		if (hash_level_size)
 			hash_level_size[i] = s;
 		if ((*hash_position + s) < *hash_position ||
@@ -418,7 +421,7 @@ int VERITY_verify(struct crypt_device *cd,
 /* Create verity hash */
 int VERITY_create(struct crypt_device *cd,
 		  struct crypt_params_verity *verity_hdr,
-		  char *root_hash,
+		  const char *root_hash,
 		  size_t root_hash_size)
 {
 	unsigned pgsize = (unsigned)crypt_getpagesize();
@@ -439,7 +442,7 @@ int VERITY_create(struct crypt_device *cd,
 		verity_hdr->data_block_size,
 		verity_hdr->data_size,
 		VERITY_hash_offset_block(verity_hdr),
-		root_hash,
+		CONST_CAST(char*)root_hash,
 		root_hash_size,
 		verity_hdr->salt,
 		verity_hdr->salt_size);

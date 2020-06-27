@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2, PBKDF2 digest handler (LUKS1 compatible)
  *
- * Copyright (C) 2015-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2019 Milan Broz
+ * Copyright (C) 2015-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -131,8 +131,8 @@ static int PBKDF2_digest_store(struct crypt_device *cd,
 	}
 
 	hmac_size = crypt_hmac_size(pbkdf.hash);
-	if (hmac_size < 0)
-		return hmac_size;
+	if (hmac_size < 0 || hmac_size > (int)sizeof(digest_raw))
+		return -EINVAL;
 
 	r = crypt_pbkdf(CRYPT_KDF_PBKDF2, pbkdf.hash, volume_key, volume_key_len,
 			salt, LUKS_SALTSIZE, digest_raw, hmac_size,

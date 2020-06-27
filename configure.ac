@@ -1,9 +1,9 @@
 AC_PREREQ([2.67])
-AC_INIT([cryptsetup],[2.1.0])
+AC_INIT([cryptsetup],[2.3.3])
 
 dnl library version from <major>.<minor>.<release>[-<suffix>]
 LIBCRYPTSETUP_VERSION=$(echo $PACKAGE_VERSION | cut -f1 -d-)
-LIBCRYPTSETUP_VERSION_INFO=16:0:4
+LIBCRYPTSETUP_VERSION_INFO=18:0:6
 
 AM_SILENT_RULES([yes])
 AC_CONFIG_SRCDIR(src/cryptsetup.c)
@@ -33,6 +33,7 @@ AC_PROG_MAKE_SET
 AC_ENABLE_STATIC(no)
 LT_INIT
 PKG_PROG_PKG_CONFIG
+AM_ICONV
 
 dnl ==========================================================================
 dnl define PKG_CHECK_VAR for old pkg-config <= 0.28
@@ -59,6 +60,12 @@ AC_HEADER_DIRENT
 AC_HEADER_STDC
 AC_CHECK_HEADERS(fcntl.h malloc.h inttypes.h sys/ioctl.h sys/mman.h \
 	sys/sysmacros.h sys/statvfs.h ctype.h unistd.h locale.h byteswap.h endian.h stdint.h)
+AC_CHECK_DECLS([O_CLOEXEC],,[AC_DEFINE([O_CLOEXEC],[0], [Defined to 0 if not provided])],
+[[
+#ifdef HAVE_FCNTL_H
+# include <fcntl.h>
+#endif
+]])
 
 AC_CHECK_HEADERS(uuid/uuid.h,,[AC_MSG_ERROR([You need the uuid library.])])
 AC_CHECK_HEADER(libdevmapper.h,,[AC_MSG_ERROR([You need the device-mapper library.])])
@@ -209,6 +216,8 @@ AC_DEFUN([CONFIGURE_GCRYPT], [
 		NO_FIPS([])
 	fi
 
+	AC_CHECK_DECLS([GCRY_CIPHER_MODE_XTS], [], [], [#include <gcrypt.h>])
+
 	if test "x$enable_static_cryptsetup" = "xyes"; then
 		saved_LIBS=$LIBS
 		LIBS="$saved_LIBS $LIBGCRYPT_LIBS -static"
@@ -346,6 +355,8 @@ AC_CHECK_DECLS([dm_task_retry_remove], [], [], [#include <libdevmapper.h>])
 AC_CHECK_DECLS([dm_task_deferred_remove], [], [], [#include <libdevmapper.h>])
 AC_CHECK_DECLS([dm_device_has_mounted_fs], [], [], [#include <libdevmapper.h>])
 AC_CHECK_DECLS([dm_device_has_holders], [], [], [#include <libdevmapper.h>])
+AC_CHECK_DECLS([dm_device_get_name], [], [], [#include <libdevmapper.h>])
+AC_CHECK_DECLS([DM_DEVICE_GET_TARGET_VERSION], [], [], [#include <libdevmapper.h>])
 AC_CHECK_DECLS([DM_UDEV_DISABLE_DISK_RULES_FLAG], [have_cookie=yes], [have_cookie=no], [#include <libdevmapper.h>])
 if test "x$enable_udev" = xyes; then
 	if test "x$have_cookie" = xno; then
@@ -359,6 +370,7 @@ LIBS=$saved_LIBS
 dnl Check for JSON-C used in LUKS2
 PKG_CHECK_MODULES([JSON_C], [json-c])
 AC_CHECK_DECLS([json_object_object_add_ex], [], [], [#include <json-c/json.h>])
+AC_CHECK_DECLS([json_object_deep_copy], [], [], [#include <json-c/json.h>])
 
 dnl Crypto backend configuration.
 AC_ARG_WITH([crypto_backend],

@@ -1,8 +1,8 @@
 /*
  * Nettle crypto backend implementation
  *
- * Copyright (C) 2011-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2011-2019 Milan Broz
+ * Copyright (C) 2011-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,7 +26,7 @@
 #include <nettle/sha3.h>
 #include <nettle/hmac.h>
 #include <nettle/pbkdf2.h>
-#include "crypto_backend.h"
+#include "crypto_backend_internal.h"
 
 #if HAVE_NETTLE_VERSION_H
 #include <nettle/version.h>
@@ -192,6 +192,10 @@ struct crypt_hmac {
 	uint8_t *key;
 };
 
+struct crypt_cipher {
+	struct crypt_cipher_kernel ck;
+};
+
 uint32_t crypt_backend_flags(void)
 {
 	return 0;
@@ -209,7 +213,7 @@ static struct hash_alg *_get_alg(const char *name)
 	return NULL;
 }
 
-int crypt_backend_init(struct crypt_device *ctx)
+int crypt_backend_init(void)
 {
 	return 0;
 }
@@ -382,4 +386,59 @@ int crypt_pbkdf(const char *kdf, const char *hash,
 	}
 
 	return -EINVAL;
+}
+
+/* Block ciphers */
+int crypt_cipher_init(struct crypt_cipher **ctx, const char *name,
+		    const char *mode, const void *key, size_t key_length)
+{
+	struct crypt_cipher *h;
+	int r;
+
+	h = malloc(sizeof(*h));
+	if (!h)
+		return -ENOMEM;
+
+	r = crypt_cipher_init_kernel(&h->ck, name, mode, key, key_length);
+	if (r < 0) {
+		free(h);
+		return r;
+	}
+
+	*ctx = h;
+	return 0;
+}
+
+void crypt_cipher_destroy(struct crypt_cipher *ctx)
+{
+	crypt_cipher_destroy_kernel(&ctx->ck);
+	free(ctx);
+}
+
+int crypt_cipher_encrypt(struct crypt_cipher *ctx,
+			 const char *in, char *out, size_t length,
+			 const char *iv, size_t iv_length)
+{
+	return crypt_cipher_encrypt_kernel(&ctx->ck, in, out, length, iv, iv_length);
+}
+
+int crypt_cipher_decrypt(struct crypt_cipher *ctx,
+			 const char *in, char *out, size_t length,
+			 const char *iv, size_t iv_length)
+{
+	return crypt_cipher_decrypt_kernel(&ctx->ck, in, out, length, iv, iv_length);
+}
+
+bool crypt_cipher_kernel_only(struct crypt_cipher *ctx)
+{
+	return true;
+}
+
+int crypt_bitlk_decrypt_key(const void *key, size_t key_length,
+			    const char *in, char *out, size_t length,
+			    const char *iv, size_t iv_length,
+			    const char *tag, size_t tag_length)
+{
+	return crypt_bitlk_decrypt_key_kernel(key, key_length, in, out, length,
+					      iv, iv_length, tag, tag_length);
 }

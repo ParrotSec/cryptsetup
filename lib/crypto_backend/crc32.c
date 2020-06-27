@@ -19,7 +19,7 @@
  *  order from highest-order term to lowest-order term.  UARTs transmit
  *  characters in order from LSB to MSB.  By storing the CRC this way,
  *  we hand it to the UART in the order low-byte to high-byte; the UART
- *  sends each low-bit to hight-bit; and the result is transmission bit
+ *  sends each low-bit to high-bit; and the result is transmission bit
  *  by bit from highest- to lowest-order term without requiring any bit
  *  shuffling on our part.  Reception works similarly.
  *
@@ -41,7 +41,6 @@
 #include <stdio.h>
 
 #include "crypto_backend.h"
-
 
 static const uint32_t crc32_tab[] = {
 	0x00000000L, 0x77073096L, 0xee0e612cL, 0x990951baL, 0x076dc419L,
@@ -113,4 +112,3 @@ uint32_t crypt_crc32(uint32_t seed, const unsigned char *buf, size_t len)
 
 	return crc;
 }
-

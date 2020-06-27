@@ -1,7 +1,7 @@
 /*
  * blkid probe utilities
  *
- * Copyright (C) 2018-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2018-2020 Red Hat, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -58,5 +58,7 @@ const char *blk_get_superblock_type(struct blkid_handle *h);
 int blk_do_wipe(struct blkid_handle *h);
 
 int blk_supported(void);
+
+off_t blk_get_offset(struct blkid_handle *h);
 
 #endif

@@ -1,8 +1,8 @@
 /*
  * cryptsetup-reencrypt - crypt utility for offline re-encryption
  *
- * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2019 Milan Broz All rights reserved.
+ * Copyright (C) 2012-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2020 Milan Broz All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -25,7 +25,7 @@
 #include <arpa/inet.h>
 #include <uuid/uuid.h>
 
-#define PACKAGE_REENC "crypt_reencrypt"
+#define PACKAGE_REENC "cryptsetup-reencrypt"
 
 #define NO_UUID "cafecafe-cafe-cafe-cafe-cafecafeeeee"
 
@@ -42,7 +42,6 @@ static const char *opt_pbkdf = NULL;
 static long opt_pbkdf_memory = DEFAULT_LUKS2_MEMORY_KB;
 static long opt_pbkdf_parallel = DEFAULT_LUKS2_PARALLEL_THREADS;
 static long opt_pbkdf_iterations = 0;
-static int opt_version_mode = 0;
 static int opt_random = 0;
 static int opt_urandom = 0;
 static int opt_bsize = 4;
@@ -100,7 +99,6 @@ struct reenc_ctx {
 	} p[MAX_SLOT];
 	int keyslot;
 
-	struct timeval start_time, end_time;
 	uint64_t resume_bytes;
 };
 
@@ -196,8 +194,15 @@ static int device_check(struct reenc_ctx *rc, const char *device, header_magic s
 	ssize_t s;
 	uint16_t version;
 	size_t buf_size = pagesize();
+	struct stat st;
 
-	devfd = open(device, O_RDWR | O_EXCL | O_DIRECT);
+	if (stat(device, &st)) {
+		log_err(_("Cannot open device %s."), device);
+		return -EINVAL;
+	}
+
+	/* coverity[toctou] */
+	devfd = open(device, O_RDWR | (S_ISBLK(st.st_mode) ? O_EXCL : 0));
 	if (devfd == -1) {
 		if (errno == EBUSY) {
 			log_err(_("Cannot exclusively open %s, device in use."),
@@ -252,7 +257,7 @@ static int device_check(struct reenc_ctx *rc, const char *device, header_magic s
 		if (lseek(devfd, 0, SEEK_SET) == -1)
 			goto out;
 		s = write(devfd, buf, buf_size);
-		if (s < 0 || s != (ssize_t)buf_size) {
+		if (s < 0 || s != (ssize_t)buf_size || fsync(devfd) < 0) {
 			log_err(_("Cannot write device %s."), device);
 			r = -EIO;
 		}
@@ -269,20 +274,15 @@ out:
 	return r;
 }
 
-static int create_empty_header(const char *new_file, uint64_t data_sectors)
+static int create_empty_header(const char *new_file)
 {
 	int fd, r = 0;
 
-	data_sectors *= SECTOR_SIZE;
-
-	if (!data_sectors)
-		data_sectors = 4096;
-
-	log_dbg("Creating empty file %s of size %" PRIu64 ".", new_file, data_sectors);
+	log_dbg("Creating empty file %s of size 4096.", new_file);
 
 	/* coverity[toctou] */
 	fd = open(new_file, O_CREAT|O_EXCL|O_WRONLY, S_IRUSR|S_IWUSR);
-	if (fd == -1 || posix_fallocate(fd, 0, data_sectors))
+	if (fd == -1 || posix_fallocate(fd, 0, 4096))
 		r = -EINVAL;
 	if (fd >= 0)
 		close(fd);
@@ -486,12 +486,13 @@ static int set_pbkdf_params(struct crypt_device *cd, const char *dev_type)
 	pbkdf.hash = opt_hash ?: pbkdf_default->hash;
 	pbkdf.time_ms = (uint32_t)opt_iteration_time ?: pbkdf_default->time_ms;
 	if (strcmp(pbkdf.type, CRYPT_KDF_PBKDF2)) {
-		pbkdf.max_memory_kb = opt_pbkdf_memory ?: pbkdf_default->max_memory_kb;
-		pbkdf.parallel_threads = opt_pbkdf_parallel ?: pbkdf_default->parallel_threads;
+		pbkdf.max_memory_kb = (uint32_t)opt_pbkdf_memory ?: pbkdf_default->max_memory_kb;
+		pbkdf.parallel_threads = (uint32_t)opt_pbkdf_parallel ?: pbkdf_default->parallel_threads;
 	}
 
 	if (opt_pbkdf_iterations) {
 		pbkdf.iterations = opt_pbkdf_iterations;
+		pbkdf.time_ms = 0;
 		pbkdf.flags |= CRYPT_PBKDF_NO_BENCHMARK;
 	}
 
@@ -549,7 +550,7 @@ static int create_new_header(struct reenc_ctx *rc, struct crypt_device *cd_old,
 
 	r = set_pbkdf_params(cd_new, type);
 	if (r) {
-		log_err(_("Failed to set PBKDF parameters."));
+		log_err(_("Failed to set pbkdf parameters."));
 		goto out;
 	}
 
@@ -709,7 +710,7 @@ static int backup_luks_headers(struct reenc_ctx *rc)
 
 	rc->data_offset = crypt_get_data_offset(cd) + ROUND_SECTOR(opt_reduce_size);
 
-	if ((r = create_empty_header(rc->header_file_new, rc->data_offset)))
+	if ((r = create_empty_header(rc->header_file_new)))
 		goto out;
 
 	params.hash = opt_hash ?: DEFAULT_LUKS1_HASH;
@@ -794,7 +795,7 @@ static int backup_fake_header(struct reenc_ctx *rc)
 		}
 	}
 
-	r = create_empty_header(header_file_fake, 0);
+	r = create_empty_header(header_file_fake);
 	if (r < 0)
 		return r;
 
@@ -821,10 +822,12 @@ static int backup_fake_header(struct reenc_ctx *rc)
 		goto out;
 
 	/* The real header is backup header created in backup_luks_headers() */
-	if (rc->reencrypt_mode == DECRYPT)
+	if (rc->reencrypt_mode == DECRYPT) {
+		r = 0;
 		goto out;
+	}
 
-	r = create_empty_header(rc->header_file_new, ROUND_SECTOR(opt_reduce_size));
+	r = create_empty_header(rc->header_file_new);
 	if (r < 0)
 		goto out;
 
@@ -869,7 +872,7 @@ static int restore_luks_header(struct reenc_ctx *rc)
 
 	/*
 	 * For new encryption and new detached header in file just move it.
-	 * For existing file try to ensure we have prealocated space for restore.
+	 * For existing file try to ensure we have preallocated space for restore.
 	 */
 	if (opt_new && rc->device_header) {
 		r = stat(rc->device_header, &st);
@@ -941,6 +944,8 @@ static int copy_data_forward(struct reenc_ctx *rc, int fd_old, int fd_new,
 
 	rc->resume_bytes = *bytes = rc->device_offset;
 
+	tools_reencrypt_progress(rc->device_size, *bytes, NULL);
+
 	if (write_log(rc) < 0)
 		return -EIO;
 
@@ -974,8 +979,8 @@ static int copy_data_forward(struct reenc_ctx *rc, int fd_old, int fd_new,
 		}
 
 		*bytes += (uint64_t)s2;
-		tools_time_progress(rc->device_size, *bytes,
-				    &rc->start_time, &rc->end_time);
+
+		tools_reencrypt_progress(rc->device_size, *bytes, NULL);
 	}
 
 	return quit ? -EAGAIN : 0;
@@ -997,6 +1002,8 @@ static int copy_data_backward(struct reenc_ctx *rc, int fd_old, int fd_new,
 		rc->resume_bytes = rc->device_size - rc->device_offset;
 		*bytes = rc->resume_bytes;
 	}
+
+	tools_reencrypt_progress(rc->device_size, *bytes, NULL);
 
 	if (write_log(rc) < 0)
 		return -EIO;
@@ -1043,8 +1050,8 @@ static int copy_data_backward(struct reenc_ctx *rc, int fd_old, int fd_new,
 		}
 
 		*bytes += (uint64_t)s2;
-		tools_time_progress(rc->device_size, *bytes,
-				    &rc->start_time, &rc->end_time);
+
+		tools_reencrypt_progress(rc->device_size, *bytes, NULL);
 	}
 
 	return quit ? -EAGAIN : 0;
@@ -1058,7 +1065,7 @@ static void zero_rest_of_device(int fd, size_t block_size, void *buf,
 	log_dbg("Zeroing rest of device.");
 
 	if (lseek64(fd, offset, SEEK_SET) < 0) {
-		log_dbg(_("Cannot seek to device offset.\n"));
+		log_dbg("Cannot seek to device offset.");
 		return;
 	}
 
@@ -1131,8 +1138,6 @@ static int copy_data(struct reenc_ctx *rc)
 	}
 
 	set_int_handler(0);
-	tools_time_progress(rc->device_size, bytes,
-			    &rc->start_time, &rc->end_time);
 
 	if (rc->reencrypt_direction == FORWARD)
 		r = copy_data_forward(rc, fd_old, fd_new, block_size, buf, &bytes);
@@ -1149,9 +1154,7 @@ static int copy_data(struct reenc_ctx *rc)
 
 	set_int_block(1);
 
-	if (r == -EAGAIN)
-		 log_err(_("Interrupted by a signal."));
-	else if (r < 0)
+	if (r < 0 && r != -EAGAIN)
 		log_err(_("IO error during reencryption."));
 
 	(void)write_log(rc);
@@ -1277,18 +1280,23 @@ static int init_keyfile(struct reenc_ctx *rc, struct crypt_device *cd, int slot_
 	if (r < 0)
 		return r;
 
-	r = crypt_activate_by_passphrase(cd, NULL, slot_check, password,
-					 passwordLen, 0);
+	/* mode ENCRYPT call this without header */
+	if (cd) {
+		r = crypt_activate_by_passphrase(cd, NULL, slot_check, password,
+						 passwordLen, 0);
 
-	/*
-	 * Allow keyslot only if it is last slot or if user explicitly
-	 * specify which slot to use (IOW others will be disabled).
-	 */
-	if (r >= 0 && opt_key_slot == CRYPT_ANY_SLOT &&
-	    crypt_keyslot_status(cd, r) != CRYPT_SLOT_ACTIVE_LAST) {
-		log_err(_("Key file can be used only with --key-slot or with "
-			  "exactly one key slot active."));
-		r = -EINVAL;
+		/*
+		 * Allow keyslot only if it is last slot or if user explicitly
+		 * specify which slot to use (IOW others will be disabled).
+		 */
+		if (r >= 0 && opt_key_slot == CRYPT_ANY_SLOT &&
+		    crypt_keyslot_status(cd, r) != CRYPT_SLOT_ACTIVE_LAST) {
+			log_err(_("Key file can be used only with --key-slot or with "
+				  "exactly one key slot active."));
+			r = -EINVAL;
+		}
+	} else {
+		r = slot_check == CRYPT_ANY_SLOT ? 0 : slot_check;
 	}
 
 	if (r < 0) {
@@ -1315,7 +1323,10 @@ static int initialize_passphrase(struct reenc_ctx *rc, const char *device)
 	log_dbg("Passphrases initialization.");
 
 	if (rc->reencrypt_mode == ENCRYPT && !rc->in_progress) {
-		r = init_passphrase1(rc, cd, _("Enter new passphrase: "), opt_key_slot, 0, 1);
+		if (opt_key_file)
+			r = init_keyfile(rc, NULL, opt_key_slot);
+		else
+			r = init_passphrase1(rc, NULL, _("Enter new passphrase: "), opt_key_slot, 0, 1);
 		return r > 0 ? 0 : r;
 	}
 
@@ -1327,7 +1338,7 @@ static int initialize_passphrase(struct reenc_ctx *rc, const char *device)
 
 	if (opt_key_slot != CRYPT_ANY_SLOT)
 		snprintf(msg, sizeof(msg),
-			 _("Enter passphrase for key slot %u: "), opt_key_slot);
+			 _("Enter passphrase for key slot %d: "), opt_key_slot);
 	else
 		snprintf(msg, sizeof(msg), _("Enter any existing passphrase: "));
 
@@ -1338,7 +1349,7 @@ static int initialize_passphrase(struct reenc_ctx *rc, const char *device)
 		   rc->reencrypt_mode == DECRYPT) {
 		r = init_passphrase1(rc, cd, msg, opt_key_slot, 1, 0);
 	} else for (i = 0; i < crypt_keyslot_max(crypt_get_type(cd)); i++) {
-		snprintf(msg, sizeof(msg), _("Enter passphrase for key slot %u: "), i);
+		snprintf(msg, sizeof(msg), _("Enter passphrase for key slot %d: "), i);
 		r = init_passphrase1(rc, cd, msg, i, 1, 0);
 		if (r == -ENOENT) {
 			r = 0;
@@ -1579,6 +1590,11 @@ static void help(poptContext popt_context,
 	if (key->shortName == '?') {
 		log_std("%s %s\n", PACKAGE_REENC, PACKAGE_VERSION);
 		poptPrintHelp(popt_context, stdout, 0);
+		poptFreeContext(popt_context);
+		exit(EXIT_SUCCESS);
+	} else if (key->shortName == 'V') {
+		log_std("%s %s\n", PACKAGE_REENC, PACKAGE_VERSION);
+		poptFreeContext(popt_context);
 		exit(EXIT_SUCCESS);
 	} else
 		usage(popt_context, EXIT_SUCCESS, NULL, NULL);
@@ -1590,11 +1606,11 @@ int main(int argc, const char **argv)
 		{ NULL,    '\0', POPT_ARG_CALLBACK, help, 0, NULL,                         NULL },
 		{ "help",  '?',  POPT_ARG_NONE,     NULL, 0, N_("Show this help message"), NULL },
 		{ "usage", '\0', POPT_ARG_NONE,     NULL, 0, N_("Display brief usage"),    NULL },
+		{ "version",'V', POPT_ARG_NONE,     NULL, 0, N_("Print package version"),  NULL },
 		POPT_TABLEEND
 	};
 	static struct poptOption popt_options[] = {
 		{ NULL,                '\0', POPT_ARG_INCLUDE_TABLE, popt_help_options, 0, N_("Help options:"), NULL },
-		{ "version",           '\0', POPT_ARG_NONE, &opt_version_mode,          0, N_("Print package version"), NULL },
 		{ "verbose",           'v',  POPT_ARG_NONE, &opt_verbose,               0, N_("Shows more detailed error messages"), NULL },
 		{ "debug",             '\0', POPT_ARG_NONE, &opt_debug,                 0, N_("Show debug messages"), NULL },
 		{ "block-size",        'B',  POPT_ARG_INT, &opt_bsize,                  0, N_("Reencryption block size"), N_("MiB") },
@@ -1647,12 +1663,6 @@ int main(int argc, const char **argv)
 		usage(popt_context, EXIT_FAILURE, poptStrerror(r),
 		      poptBadOption(popt_context, POPT_BADOPTION_NOALIAS));
 
-	if (opt_version_mode) {
-		log_std("%s %s\n", PACKAGE_REENC, PACKAGE_VERSION);
-		poptFreeContext(popt_context);
-		exit(EXIT_SUCCESS);
-	}
-
 	if (!opt_batch_mode)
 		log_verbose(_("Reencryption will change: %s%s%s%s%s%s."),
 			opt_keep_key ? "" :  _("volume key"),
@@ -1680,12 +1690,12 @@ int main(int argc, const char **argv)
 
 	if (opt_pbkdf && crypt_parse_pbkdf(opt_pbkdf, &opt_pbkdf))
 		usage(popt_context, EXIT_FAILURE,
-		_("Password-based key derivation function (PBKDF) can be only pbkdf2 or argon2i/argon2id.\n"),
+		_("Password-based key derivation function (PBKDF) can be only pbkdf2 or argon2i/argon2id."),
 		poptGetInvocationName(popt_context));
 
 	if (opt_pbkdf_iterations && opt_iteration_time)
 		usage(popt_context, EXIT_FAILURE,
-		_("PBKDF forced iterations cannot be combined with iteration time option.\n"),
+		_("PBKDF forced iterations cannot be combined with iteration time option."),
 		poptGetInvocationName(popt_context));
 
 	if (opt_bsize < 1 || opt_bsize > 64)

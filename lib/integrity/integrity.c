@@ -1,7 +1,7 @@
 /*
  * Integrity volume handling
  *
- * Copyright (C) 2016-2019 Milan Broz
+ * Copyright (C) 2016-2020 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -22,7 +22,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
 #include <uuid/uuid.h>
 
 #include "integrity.h"
@@ -35,14 +34,13 @@ static int INTEGRITY_read_superblock(struct crypt_device *cd,
 	int devfd, r;
 
 	devfd = device_open(cd, device, O_RDONLY);
-	if(devfd < 0) {
+	if(devfd < 0)
 		return -EINVAL;
-	}
 
 	if (read_lseek_blockwise(devfd, device_block_size(cd, device),
 		device_alignment(device), sb, sizeof(*sb), offset) != sizeof(*sb) ||
 	    memcmp(sb->magic, SB_MAGIC, sizeof(sb->magic)) ||
-	    (sb->version != SB_VERSION_1 && sb->version != SB_VERSION_2)) {
+	    sb->version < SB_VERSION_1 || sb->version > SB_VERSION_4) {
 		log_std(cd, "No integrity superblock detected on %s.\n",
 			device_path(device));
 		r = -EINVAL;
@@ -55,11 +53,12 @@ static int INTEGRITY_read_superblock(struct crypt_device *cd,
 		r = 0;
 	}
 
-	close(devfd);
 	return r;
 }
 
-int INTEGRITY_read_sb(struct crypt_device *cd, struct crypt_params_integrity *params)
+int INTEGRITY_read_sb(struct crypt_device *cd,
+		      struct crypt_params_integrity *params,
+		      uint32_t *flags)
 {
 	struct superblock sb;
 	int r;
@@ -70,6 +69,9 @@ int INTEGRITY_read_sb(struct crypt_device *cd, struct crypt_params_integrity *pa
 
 	params->sector_size = SECTOR_SIZE << sb.log2_sectors_per_block;
 	params->tag_size = sb.integrity_tag_size;
+
+	if (flags)
+		*flags = sb.flags;
 
 	return 0;
 }
@@ -92,9 +94,12 @@ int INTEGRITY_dump(struct crypt_device *cd, struct device *device, uint64_t offs
 	log_std(cd, "sector_size %u\n", SECTOR_SIZE << sb.log2_sectors_per_block);
 	if (sb.version == SB_VERSION_2 && (sb.flags & SB_FLAG_RECALCULATING))
 		log_std(cd, "recalc_sector %" PRIu64 "\n", sb.recalc_sector);
-	log_std(cd, "flags %s%s\n",
+	log_std(cd, "log2_blocks_per_bitmap %u\n", sb.log2_blocks_per_bitmap_bit);
+	log_std(cd, "flags %s%s%s%s\n",
 		sb.flags & SB_FLAG_HAVE_JOURNAL_MAC ? "have_journal_mac " : "",
-		sb.flags & SB_FLAG_RECALCULATING ? "recalculating " : "");
+		sb.flags & SB_FLAG_RECALCULATING ? "recalculating " : "",
+		sb.flags & SB_FLAG_DIRTY_BITMAP ? "dirty_bitmap " : "",
+		sb.flags & SB_FLAG_FIXED_PADDING ? "fix_padding " : "");
 
 	return 0;
 }
@@ -134,6 +139,27 @@ int INTEGRITY_key_size(struct crypt_device *cd, const char *integrity)
 		return 0;
 
 	return -EINVAL;
+}
+
+/* Return hash or hmac(hash) size, if known */
+int INTEGRITY_hash_tag_size(const char *integrity)
+{
+	char hash[MAX_CIPHER_LEN];
+	int r;
+
+	if (!integrity)
+		return 0;
+
+	if (!strcmp(integrity, "crc32") || !strcmp(integrity, "crc32c"))
+		return 4;
+
+	r = sscanf(integrity, "hmac(%" MAX_CIPHER_LEN_STR "[^)]s", hash);
+	if (r == 1)
+		r = crypt_hash_size(hash);
+	else
+		r = crypt_hash_size(integrity);
+
+	return r < 0 ? 0 : r;
 }
 
 int INTEGRITY_tag_size(struct crypt_device *cd,
@@ -186,7 +212,7 @@ int INTEGRITY_create_dmd_device(struct crypt_device *cd,
 		       struct volume_key *journal_crypt_key,
 		       struct volume_key *journal_mac_key,
 		       struct crypt_dm_active_device *dmd,
-		       uint32_t flags)
+		       uint32_t flags, uint32_t sb_flags)
 {
 	int r;
 
@@ -197,12 +223,16 @@ int INTEGRITY_create_dmd_device(struct crypt_device *cd,
 		.flags = flags,
 	};
 
+	/* Workaround for kernel dm-integrity table bug */
+	if (sb_flags & SB_FLAG_RECALCULATING)
+		dmd->flags |= CRYPT_ACTIVATE_RECALCULATE;
+
 	r = INTEGRITY_data_sectors(cd, crypt_metadata_device(cd),
 				   crypt_get_data_offset(cd) * SECTOR_SIZE, &dmd->size);
 	if (r < 0)
 		return r;
 
-	return dm_integrity_target_set(&dmd->segment, 0, dmd->size,
+	return dm_integrity_target_set(cd, &dmd->segment, 0, dmd->size,
 			crypt_metadata_device(cd), crypt_data_device(cd),
 			crypt_get_integrity_tag_size(cd), crypt_get_data_offset(cd),
 			crypt_get_sector_size(cd), vk, journal_crypt_key,
@@ -211,7 +241,9 @@ int INTEGRITY_create_dmd_device(struct crypt_device *cd,
 
 int INTEGRITY_activate_dmd_device(struct crypt_device *cd,
 		       const char *name,
-		       struct crypt_dm_active_device *dmd)
+		       const char *type,
+		       struct crypt_dm_active_device *dmd,
+		       uint32_t sb_flags)
 {
 	int r;
 	uint32_t dmi_flags;
@@ -234,9 +266,15 @@ int INTEGRITY_activate_dmd_device(struct crypt_device *cd,
 			return r;
 	}
 
-	r = dm_create_device(cd, name, "INTEGRITY", dmd);
+	r = dm_create_device(cd, name, type, dmd);
 	if (r < 0 && (dm_flags(cd, DM_INTEGRITY, &dmi_flags) || !(dmi_flags & DM_INTEGRITY_SUPPORTED))) {
-		log_err(cd, _("Kernel doesn't support dm-integrity mapping."));
+		log_err(cd, _("Kernel does not support dm-integrity mapping."));
+		return -ENOTSUP;
+	}
+
+	if (r < 0 && (sb_flags & SB_FLAG_FIXED_PADDING) && !dm_flags(cd, DM_INTEGRITY, &dmi_flags) &&
+	    !(dmi_flags & DM_INTEGRITY_FIX_PADDING_SUPPORTED)) {
+		log_err(cd, _("Kernel does not support dm-integrity fixed metadata alignment."));
 		return -ENOTSUP;
 	}
 
@@ -249,15 +287,16 @@ int INTEGRITY_activate(struct crypt_device *cd,
 		       struct volume_key *vk,
 		       struct volume_key *journal_crypt_key,
 		       struct volume_key *journal_mac_key,
-		       uint32_t flags)
+		       uint32_t flags, uint32_t sb_flags)
 {
 	struct crypt_dm_active_device dmd = {};
-	int r = INTEGRITY_create_dmd_device(cd, params, vk, journal_crypt_key, journal_mac_key, &dmd, flags);
+	int r = INTEGRITY_create_dmd_device(cd, params, vk, journal_crypt_key,
+					    journal_mac_key, &dmd, flags, sb_flags);
 
 	if (r < 0)
 		return r;
 
-	r = INTEGRITY_activate_dmd_device(cd, name, &dmd);
+	r = INTEGRITY_activate_dmd_device(cd, name, CRYPT_INTEGRITY, &dmd, sb_flags);
 	dm_targets_free(cd, &dmd);
 	return r;
 }
@@ -287,7 +326,7 @@ int INTEGRITY_format(struct crypt_device *cd,
 	if (params && params->integrity_key_size)
 		vk = crypt_alloc_volume_key(params->integrity_key_size, NULL);
 
-	r = dm_integrity_target_set(tgt, 0, dmdi.size, crypt_metadata_device(cd),
+	r = dm_integrity_target_set(cd, tgt, 0, dmdi.size, crypt_metadata_device(cd),
 			crypt_data_device(cd), crypt_get_integrity_tag_size(cd),
 			crypt_get_data_offset(cd), crypt_get_sector_size(cd), vk,
 			journal_crypt_key, journal_mac_key, params);
@@ -301,7 +340,7 @@ int INTEGRITY_format(struct crypt_device *cd,
 
 	r = device_block_adjust(cd, tgt->data_device, DEV_EXCL, tgt->u.integrity.offset, NULL, NULL);
 	if (r < 0 && (dm_flags(cd, DM_INTEGRITY, &dmi_flags) || !(dmi_flags & DM_INTEGRITY_SUPPORTED))) {
-		log_err(cd, _("Kernel doesn't support dm-integrity mapping."));
+		log_err(cd, _("Kernel does not support dm-integrity mapping."));
 		r = -ENOTSUP;
 	}
 	if (r) {
@@ -317,7 +356,7 @@ int INTEGRITY_format(struct crypt_device *cd,
 		}
 	}
 
-	r = dm_create_device(cd, tmp_name, "INTEGRITY", &dmdi);
+	r = dm_create_device(cd, tmp_name, CRYPT_INTEGRITY, &dmdi);
 	crypt_free_volume_key(vk);
 	dm_targets_free(cd, &dmdi);
 	if (r)

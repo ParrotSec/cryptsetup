@@ -3,7 +3,8 @@
 #turn on debug mode by following env. variable _DEBUG=1
 
 PS4='$LINENO:'
-CRYPTSETUP=../cryptsetup
+[ -z "$CRYPTSETUP_PATH" ] && CRYPTSETUP_PATH=".."
+CRYPTSETUP=$CRYPTSETUP_PATH/cryptsetup
 
 CRYPTSETUP_VALGRIND=../.libs/cryptsetup
 CRYPTSETUP_LIB_VALGRIND=../.libs
@@ -28,7 +29,8 @@ function remove_mapping()
 function fail()
 {
 	[ -n "$1" ] && echo "$1"
-	echo "FAILED at line $(caller)"
+	echo "FAILED backtrace:"
+	while caller $frame; do ((frame++)); done
 	cd $START_DIR
 	remove_mapping
 	exit 2

@@ -1,8 +1,8 @@
 /*
  * Metadata on-disk locking for processes serialization
  *
- * Copyright (C) 2016-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2016-2019 Ondrej Kozina
+ * Copyright (C) 2016-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2016-2020 Ondrej Kozina
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -24,14 +24,24 @@
 
 struct crypt_device;
 struct crypt_lock_handle;
+struct device;
 
 int device_locked_readonly(struct crypt_lock_handle *h);
 int device_locked(struct crypt_lock_handle *h);
 
-struct crypt_lock_handle *device_read_lock_handle(struct crypt_device *cd, const char *device_path);
-struct crypt_lock_handle *device_write_lock_handle(struct crypt_device *cd, const char *device_path);
-void device_unlock_handle(struct crypt_device *cd, struct crypt_lock_handle *h);
+int device_read_lock_internal(struct crypt_device *cd, struct device *device);
+int device_write_lock_internal(struct crypt_device *cd, struct device *device);
+void device_unlock_internal(struct crypt_device *cd, struct device *device);
 
 int device_locked_verify(struct crypt_device *cd, int fd, struct crypt_lock_handle *h);
+
+int crypt_read_lock(struct crypt_device *cd, const char *name, bool blocking, struct crypt_lock_handle **lock);
+int crypt_write_lock(struct crypt_device *cd, const char *name, bool blocking, struct crypt_lock_handle **lock);
+void crypt_unlock_internal(struct crypt_device *cd, struct crypt_lock_handle *h);
+
+
+/* Used only in device internal allocation */
+void device_set_lock_handle(struct device *device, struct crypt_lock_handle *h);
+struct crypt_lock_handle *device_get_lock_handle(struct device *device);
 
 #endif

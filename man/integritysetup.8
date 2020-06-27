@@ -33,7 +33,7 @@ Open a mapping with <name> backed by device <device>.
 \fB<options>\fR can be [\-\-data\-device, \-\-batch\-mode, \-\-journal\-watermark,
 \-\-journal\-commit\-time, \-\-buffer\-sectors, \-\-integrity, \-\-integrity\-key\-size,
 \-\-integrity\-key\-file, \-\-integrity\-no\-journal, \-\-integrity\-recalculate,
-\-\-integrity\-recovery\-mode]
+\-\-integrity\-recovery\-mode, \-\-allow\-discards]
 
 .PP
 \fIclose\fR <name>
@@ -125,6 +125,21 @@ The file with the integrity key.
 .TP
 .B "\-\-integrity\-no\-journal, \-D"
 Disable journal for integrity device.
+.TP
+.B "\-\-integrity\-bitmap\-mode. \-B"
+Use alternate bitmap mode (available since Linux kernel 5.2)  where dm-integrity uses bitmap
+instead of a journal. If a bit in the bitmap is 1, the corresponding region's data and integrity tags
+are not synchronized - if the machine crashes, the unsynchronized regions will be recalculated.
+The bitmap mode is faster than the journal mode, because we don't have to write the data
+twice, but it is also less reliable, because if data corruption happens
+when the machine crashes, it may not be detected.
+.TP
+.B "\-\-bitmap\-sectors\-per\-bit SECTORS"
+Number of 512-byte sectors per bitmap bit, the value must be power of two.
+.TP
+.B "\-\-bitmap\-flush\-time MS"
+Bitmap flush time in milliseconds.
+.TP
 
 \fBWARNING:\fR
 In case of a crash, it is possible that the data and integrity tag doesn't match
@@ -150,14 +165,18 @@ The file with the integrity key.
 .TP
 .B "\-\-journal\-crypt ALGORITHM"
 Encryption algorithm for journal data area.
-You can use a block cipher here such as cbc(aes) or
-a stream cipher, for example, chacha20 or ctr(aes).
+You can use a block cipher here such as cbc-aes or
+a stream cipher, for example, chacha20 or ctr-aes.
 .TP
 .B "\-\-journal\-crypt\-key\-size BYTES"
 The size of the journal encryption key.
 .TP
 .B "\-\-journal\-crypt\-key\-file FILE"
 The file with the journal encryption key.
+.TP
+.B "\-\-allow\-discards\fR"
+Allow the use of discard (TRIM) requests for the device.
+This option is available since the Linux kernel version 5.7.
 .TP
 The dm-integrity target is available since Linux kernel version 4.12.
 .TP
@@ -208,9 +227,9 @@ Please attach the output of the failed command with the
 The integritysetup tool is written by Milan Broz <gmazyland@gmail.com>
 and is part of the cryptsetup project.
 .SH COPYRIGHT
-Copyright \(co 2016-2019 Red Hat, Inc.
+Copyright \(co 2016-2020 Red Hat, Inc.
 .br
-Copyright \(co 2016-2019 Milan Broz
+Copyright \(co 2016-2020 Milan Broz
 
 This is free software; see the source for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.

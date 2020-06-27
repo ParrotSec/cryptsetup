@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2
  *
- * Copyright (C) 2015-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2019 Milan Broz
+ * Copyright (C) 2015-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -23,7 +23,6 @@
 #define _CRYPTSETUP_LUKS2_INTERNAL_H
 
 #include <stdio.h>
-#include <fcntl.h>
 #include <errno.h>
 #include <json-c/json.h>
 
@@ -44,7 +43,7 @@
 int LUKS2_disk_hdr_read(struct crypt_device *cd, struct luks2_hdr *hdr,
 			struct device *device, int do_recovery, int do_blkprobe);
 int LUKS2_disk_hdr_write(struct crypt_device *cd, struct luks2_hdr *hdr,
-			 struct device *device);
+			 struct device *device, bool seqid_check);
 
 /*
  * JSON struct access helpers
@@ -54,17 +53,18 @@ json_object *LUKS2_get_token_jobj(struct luks2_hdr *hdr, int token);
 json_object *LUKS2_get_digest_jobj(struct luks2_hdr *hdr, int digest);
 json_object *LUKS2_get_segment_jobj(struct luks2_hdr *hdr, int segment);
 json_object *LUKS2_get_tokens_jobj(struct luks2_hdr *hdr);
+json_object *LUKS2_get_segments_jobj(struct luks2_hdr *hdr);
 
 void hexprint_base64(struct crypt_device *cd, json_object *jobj,
 		     const char *sep, const char *line_sep);
 
-json_object *parse_json_len(struct crypt_device *cd, const char *json_area,
-			    uint64_t max_length, int *json_len);
-uint64_t json_object_get_uint64(json_object *jobj);
-uint32_t json_object_get_uint32(json_object *jobj);
-json_object *json_object_new_uint64(uint64_t value);
+uint64_t crypt_jobj_get_uint64(json_object *jobj);
+uint32_t crypt_jobj_get_uint32(json_object *jobj);
+json_object *crypt_jobj_new_uint64(uint64_t value);
+
 int json_object_object_add_by_uint(json_object *jobj, unsigned key, json_object *jobj_val);
 void json_object_object_del_by_uint(json_object *jobj, unsigned key);
+int json_object_copy(json_object *jobj_src, json_object **jobj_dst);
 
 void JSON_DBG(struct crypt_device *cd, json_object *jobj, const char *desc);
 
@@ -73,12 +73,11 @@ void JSON_DBG(struct crypt_device *cd, json_object *jobj, const char *desc);
  */
 
 /* validation helper */
+json_bool validate_json_uint32(json_object *jobj);
 json_object *json_contains(struct crypt_device *cd, json_object *jobj, const char *name,
 			   const char *section, const char *key, json_type type);
 
 int LUKS2_hdr_validate(struct crypt_device *cd, json_object *hdr_jobj, uint64_t json_size);
-int LUKS2_keyslot_validate(struct crypt_device *cd, json_object *hdr_jobj,
-			   json_object *hdr_keyslot, const char *key);
 int LUKS2_check_json_size(struct crypt_device *cd, const struct luks2_hdr *hdr);
 int LUKS2_token_validate(struct crypt_device *cd, json_object *hdr_jobj,
 			 json_object *jobj_token, const char *key);
@@ -141,6 +140,12 @@ typedef struct  {
 	keyslot_repair_func repair;
 } keyslot_handler;
 
+/* can not fit prototype alloc function */
+int reenc_keyslot_alloc(struct crypt_device *cd,
+	struct luks2_hdr *hdr,
+	int keyslot,
+	const struct crypt_params_reencrypt *params);
+
 /**
  * LUKS2 digest handlers (EXPERIMENTAL)
  */
@@ -156,8 +161,6 @@ typedef struct  {
 	digest_store_func  store;
 	digest_dump_func   dump;
 } digest_handler;
-
-const digest_handler *LUKS2_digest_handler_type(struct crypt_device *cd, const char *type);
 
 /**
  * LUKS2 token handlers (internal use only)
@@ -178,5 +181,23 @@ int token_keyring_get(json_object *, void *);
 
 int LUKS2_find_area_gap(struct crypt_device *cd, struct luks2_hdr *hdr,
 			size_t keylength, uint64_t *area_offset, uint64_t *area_length);
+int LUKS2_find_area_max_gap(struct crypt_device *cd, struct luks2_hdr *hdr,
+			    uint64_t *area_offset, uint64_t *area_length);
+
+int LUKS2_check_cipher(struct crypt_device *cd,
+		      size_t keylength,
+		      const char *cipher,
+		      const char *cipher_mode);
+
+static inline const char *crypt_reencrypt_mode_to_str(crypt_reencrypt_mode_info mi)
+{
+	if (mi == CRYPT_REENCRYPT_REENCRYPT)
+		return "reencrypt";
+	if (mi == CRYPT_REENCRYPT_ENCRYPT)
+		return "encrypt";
+	if (mi == CRYPT_REENCRYPT_DECRYPT)
+		return "decrypt";
+	return "<unknown>";
+}
 
 #endif

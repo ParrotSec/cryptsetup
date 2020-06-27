@@ -1,8 +1,8 @@
 /*
  * loop-AES compatible volume handling
  *
- * Copyright (C) 2011-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2011-2019 Milan Broz
+ * Copyright (C) 2011-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -81,7 +81,7 @@ static int hash_keys(struct crypt_device *cd,
 	const char *hash_name;
 	char tweak, *key_ptr;
 	unsigned int i;
-	int r;
+	int r = 0;
 
 	hash_name = hash_override ?: get_hash(key_len_output);
 	tweak = get_tweak(keys_count);
@@ -242,7 +242,7 @@ int LOOPAES_activate(struct crypt_device *cd,
 
 	if (r < 0 && !dm_flags(cd, DM_CRYPT, &dmc_flags) &&
 	    (dmc_flags & req_flags) != req_flags) {
-		log_err(cd, _("Kernel doesn't support loop-AES compatible mapping."));
+		log_err(cd, _("Kernel does not support loop-AES compatible mapping."));
 		r = -ENOTSUP;
 	}
 

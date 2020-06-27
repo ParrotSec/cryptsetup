@@ -12,7 +12,7 @@ and can hence offer more features than plain dm-crypt. On the other
 hand, the header is visible and vulnerable to damage.
 
 In addition, cryptsetup provides limited support for the use of
-loop-AES volumes and for TrueCrypt compatible volumes.
+loop-AES volumes, TrueCrypt, VeraCrypt and BitLocker compatible volumes.
 
 .SH PLAIN DM-CRYPT OR LUKS?
 .PP
@@ -84,6 +84,8 @@ For backward compatibility there are \fBopen\fR command aliases:
 \fBloopaesOpen\fR: open \-\-type loopaes
 .br
 \fBtcryptOpen\fR: open \-\-type tcrypt
+.br
+\fBbitlkOpen\fR: open \-\-type bitlk
 
 \fB<options>\fR are type specific and are described below
 for individual device types. For \fBcreate\fR, the order of the <name>
@@ -110,9 +112,9 @@ Reports the status for the mapping <name>.
 .IP
 Resizes an active mapping <name>.
 
-If \-\-size (in 512-bytes sectors) is not specified, the size is computed
-from the underlying device. For LUKS it is the size of the
-underlying device without the area reserved for LUKS header
+If \-\-size (in 512-bytes sectors) or \-\-device\-size are not specified,
+the size is computed from the underlying device. For LUKS it is the size
+of the underlying device without the area reserved for LUKS header
 (see data payload offset in \fBluksDump\fR command).
 For plain crypt device, the whole device size is used.
 
@@ -159,6 +161,45 @@ above in LUKS2 metadata (only after successful refresh operation).
 
 \-\-disable\-keyring parameter refreshes a device with volume key passed
 in dm-crypt driver.
+
+.PP
+\fIreencrypt\fR <device> or --active-name <name> [<new_name>]
+.IP
+Run resilient reencryption (LUKS2 device only).
+
+There are 3 basic modes of operation:
+
+\(bu device reencryption (\fIreencrypt\fR)
+
+\(bu device encryption (\fIreencrypt\fR \-\-encrypt)
+
+\(bu device decryption (\fIreencrypt\fR \-\-decrypt)
+
+<device> or --active-name <name> is mandatory parameter.
+
+With <device> parameter cryptsetup looks up active <device> dm mapping.
+If no active mapping is detected, it starts offline reencryption otherwise online
+reencryption takes place.
+
+Reencryption process may be safely interrupted by a user via SIGTERM signal (ctrl+c).
+
+To resume already initialized or interrupted reencryption, just run the cryptsetup
+\fIreencrypt\fR command again to continue the reencryption operation.
+Reencryption may be resumed with different \-\-resilience or \-\-hotzone\-size unless
+implicit datashift resilience mode is used (reencrypt \-\-encrypt with \-\-reduce-device-size
+option).
+
+If the reencryption process was interrupted abruptly (reencryption process crash, system crash, poweroff)
+it may require recovery. The recovery is currently run automatically on next activation (action \fIopen\fR)
+when needed.
+
+Optional parameter <new_name> takes effect only with \-\-encrypt option and it activates device <new_name>
+immediately after encryption initialization gets finished. That's useful when device needs to be ready
+as soon as possible and mounted (used) before full data area encryption is completed.
+
+Action supports following additional \fB<options>\fR [\-\-encrypt, \-\-decrypt, \-\-device\-size,
+\-\-resilience, \-\-resilience-hash, \-\-hotzone-size, \-\-init\-only, \-\-resume\-only,
+\-\-reduce\-device\-size].
 
 .SH PLAIN MODE
 Plain dm-crypt encrypts the device sector-by-sector with a
@@ -276,7 +317,8 @@ the command prompts for it interactively.
 \fB<options>\fR can be [\-\-key\-file, \-\-keyfile\-offset,
 \-\-keyfile\-size, \-\-readonly, \-\-test\-passphrase,
 \-\-allow\-discards, \-\-header, \-\-key-slot, \-\-master\-key\-file, \-\-token\-id,
-\-\-token\-only, \-\-disable\-keyring, \-\-disable\-locks, \-\-type, \-\-refresh].
+\-\-token\-only, \-\-disable\-keyring, \-\-disable\-locks, \-\-type, \-\-refresh,
+\-\-serialize\-memory\-hard\-pbkdf].
 .PP
 \fIluksSuspend\fR <name>
 .IP
@@ -317,7 +359,8 @@ is not required.
 \fB<options>\fR can be [\-\-key\-file, \-\-keyfile\-offset,
 \-\-keyfile\-size, \-\-new\-keyfile\-offset,
 \-\-new\-keyfile\-size, \-\-key\-slot, \-\-master\-key\-file,
-\-\-iter\-time, \-\-force\-password, \-\-header, \-\-disable\-locks,
+\-\-force\-password, \-\-header, \-\-disable\-locks,
+\-\-iter-time, \-\-pbkdf, \-\-pbkdf\-force\-iterations,
 \-\-unbound, \-\-type, \-\-keyslot\-cipher, \-\-keyslot\-key\-size].
 .PP
 \fIluksRemoveKey\fR <device> [<key file with passphrase to be removed>]
@@ -360,6 +403,7 @@ inaccessible.
 
 \fB<options>\fR can be [\-\-key\-file, \-\-keyfile\-offset,
 \-\-keyfile\-size, \-\-new\-keyfile\-offset,
+\-\-iter-time, \-\-pbkdf, \-\-pbkdf\-force\-iterations,
 \-\-new\-keyfile\-size, \-\-key\-slot, \-\-force\-password, \-\-header,
 \-\-disable\-locks, \-\-type, \-\-keyslot\-cipher, \-\-keyslot\-key\-size].
 .PP
@@ -446,14 +490,18 @@ master key is dumped to a file instead of standard output. Beware that the
 master key cannot be changed without reencryption and can be used to decrypt
 the data stored in the LUKS container without a passphrase and even without the
 LUKS header. This means that if the master key is compromised, the whole device
-has to be erased to prevent further access. Use this option carefully.
+has to be erased or reencrypted to prevent further access. Use this option carefully.
 
 To dump the master key, a passphrase has to be supplied,
 either interactively or via \-\-key\-file.
 
+To dump unbound key (LUKS2 format only), \-\-unbound parameter, specific \-\-key-slot
+id and proper passphrase has to be supplied, either interactively or via \-\-key\-file.
+Optional \-\-master\-key\-file parameter enables unbound keyslot dump to a file.
+
 \fB<options>\fR can be [\-\-dump\-master\-key, \-\-key\-file,
 \-\-keyfile\-offset, \-\-keyfile\-size, \-\-header, \-\-disable\-locks,
-\-\-master\-key\-file, \-\-type].
+\-\-master\-key\-file, \-\-type, \-\-unbound, \-\-key-slot].
 
 \fBWARNING:\fR If \-\-dump\-master\-key is used with \-\-key\-file
 and the argument to \-\-key\-file is '-', no validation question
@@ -701,6 +749,47 @@ TrueCrypt.
 
 Please note that cryptsetup does not use TrueCrypt code, please report
 all problems related to this compatibility extension to the cryptsetup project.
+
+.SH BITLK (Windows BitLocker-compatible) EXTENSION (EXPERIMENTAL)
+cryptsetup supports mapping of BitLocker and BitLocker to Go encrypted partition
+using a native Linux kernel API.
+Header formatting and BITLK header changes are not supported, cryptsetup
+never changes BITLK header on-device.
+
+\fBWARNING:\fR This extension is EXPERIMENTAL.
+
+BITLK extension requires kernel userspace crypto API to be available
+(for details see TCRYPT section).
+
+Cryptsetup should recognize all BITLK header variants, except legacy
+header used in Windows Vista systems and partially decrypted BitLocker devices.
+Activation of legacy devices encrypted in CBC mode requires at least
+Linux kernel version 5.3 and for devices using Elephant diffuser kernel 5.6.
+
+The \fBbitlkDump\fR command should work for all recognized BITLK devices
+and doesn't require superuser privilege.
+
+For unlocking with the \fBopen\fR a password or a recovery passphrase must
+be provided. Other unlocking methods (TPM, SmartCard) are not supported.
+
+.PP
+\fIopen\fR \-\-type bitlk <device> <name>
+.br
+\fIbitlkOpen\fR <device> <name>  (\fBold syntax\fR)
+.IP
+Opens the BITLK (a BitLocker-compatible) <device> and sets up
+a mapping <name>.
+
+\fB<options>\fR can be [\-\-key\-file, \-\-readonly, \-\-test\-passphrase,
+\-\-allow-discards].
+
+.PP
+\fIbitlkDump\fR <device>
+.IP
+Dump the header information of a BITLK device.
+
+Please note that cryptsetup does not use any Windows BitLocker code, please report
+all problems related to this compatibility extension to the cryptsetup project.
 .SH MISCELLANEOUS
 .PP
 \fIrepair\fR <device>
@@ -943,6 +1032,22 @@ Hence, if \-\-offset \fIn\fR, and \-\-skip \fIs\fR, sector \fIn\fR
 (the first sector of the encrypted device) will get a sector number
 of \fIs\fR for the IV calculation.
 .TP
+.B "\-\-device\-size \fIsize[units]\fR"
+Instead of real device size, use specified value.
+
+With \fIreencrypt\fR action it means that only specified area
+(from the start of the device to the specified size) will be
+reencrypted.
+
+With \fIresize\fR action it sets new size of the device.
+
+If no unit suffix is specified, the size is in bytes.
+
+Unit suffix can be S for 512 byte sectors, K/M/G/T (or KiB,MiB,GiB,TiB)
+for units with 1024 base or KB/MB/GB/TB for 1000 base (SI scale).
+
+\fBWARNING:\fR This is destructive operation when used with reencrypt command.
+.TP
 .B "\-\-readonly, \-r"
 set up a read-only mapping.
 .TP
@@ -1070,6 +1175,7 @@ e.g. 12345678-1234-1234-1234-123456789abc.
 .B "\-\-allow\-discards\fR"
 Allow the use of discard (TRIM) requests for the device.
 This option is only relevant for \fIopen\fR action.
+This is also not supported for LUKS2 devices with data integrity protection.
 
 \fBWARNING:\fR This command can have a negative security impact
 because it can make filesystem-level operations visible on
@@ -1135,7 +1241,7 @@ with the \-\-header option. Use with care.
 .TP
 .B "\-\-header\-backup\-file <file>"
 Specify file with header backup for \fIluksHeaderBackup\fR or
-\fIluksHeaderBackup\fR actions.
+\fIluksHeaderRestore\fR actions.
 .TP
 .B "\-\-force\-password"
 Do not use password quality checking for new LUKS passwords.
@@ -1159,8 +1265,8 @@ a restricted environment where locking is impossible to perform
 (where /run directory cannot be used).
 .TP
 .B "\-\-disable\-keyring"
-Do not load volume key in kernel keyring but use store key directly
-in the dm-crypt target.
+Do not load volume key in kernel keyring and store it directly
+in the dm-crypt target instead.
 This option is supported only for the LUKS2 format.
 .TP
 .B "\-\-key\-description <text>"
@@ -1199,11 +1305,25 @@ Increasing sector size from 512 bytes to 4096 bytes can provide better
 performance on most of the modern storage devices and also with some
 hw encryption accelerators.
 .TP
+.B "\-\-iv-large-sectors"
+Count Initialization Vector (IV) in larger sector size (if set) instead
+of 512 bytes sectors. This option can be used only for \fIopen\fR command
+and \fIplain\fR encryption type.
+
+\fBNOTE:\fR This option does not have any performance or security impact,
+use it only for accessing incompatible existing disk images from other systems
+that require this option.
+.TP
 .B "\-\-persistent"
-If used with LUKS2 devices and activation commands like \fIopen\fR,
+If used with LUKS2 devices and activation commands like \fIopen\fR or \fIrefresh\fR,
 the specified activation flags are persistently written into metadata
 and used next time automatically even for normal activation.
 (No need to use cryptab or other system configuration files.)
+
+If you need to remove a persistent flag, use \fI\-\-persistent\fR without
+the flag you want to remove (e.g. to disable persistently stored discard flag,
+use \fI\-\-persistent\fR without \fI\-\-allow-discards\fR).
+
 Only \fI\-\-allow-discards\fR, \fI\-\-perf\-same_cpu_crypt\fR,
 \fI\-\-perf\-submit_from_crypt_cpus\fR and \fI\-\-integrity\-no\-journal\fR
 can be stored persistently.
@@ -1266,8 +1386,9 @@ integrity tag.
 .TP
 .B "\-\-unbound"
 
-Creates new LUKS2 unbound keyslot. See \fIluksAddKey\fR action for more
-details.
+Creates new or dumps existing LUKS2 unbound keyslot. See \fIluksAddKey\fR or
+\fIluksDump\fR actions for more details.
+
 .TP
 .B "\-\-tcrypt\-hidden"
 .B "\-\-tcrypt\-system"
@@ -1283,6 +1404,68 @@ See \fITCRYPT\fR section for more info.
 .B "\-\-veracrypt\-query\-pim"
 Use a custom Personal Iteration Multiplier (PIM) for VeraCrypt device.
 See \fITCRYPT\fR section for more info.
+.TP
+.B "\-\-serialize\-memory\-hard\-pbkdf"
+Use a global lock to serialize unlocking of keyslots using memory-hard PBKDF.
+
+\fBNOTE:\fR This is (ugly) workaround for a specific situation when multiple
+devices are activated in parallel and system instead of reporting out of memory
+starts unconditionally stop processes using out-of-memory killer.
+
+\fBDO NOT USE\fR this switch until you are implementing boot environment
+with parallel devices activation!
+.TP
+.B "\-\-encrypt"
+Initialize (and run) device encryption (\fIreencrypt\fR action parameter)
+.TP
+.B "\-\-decrypt"
+Initialize (and run) device decryption (\fIreencrypt\fR action parameter)
+.TP
+.B "\-\-init\-only"
+Initialize reencryption (any variant) operation in LUKS2 metadata only and exit. If any
+reencrypt operation is already initialized in metadata, the command with \-\-init\-only
+parameter fails.
+.TP
+.B "\-\-resume\-only"
+Resume reencryption (any variant) operation already described in LUKS2 metadata. If no
+reencrypt operation is initialized, the command with \-\-resume\-only
+parameter fails. Useful for resuming reencrypt operation without accidentally triggering
+new reencryption operation.
+.TP
+.B "\-\-resilience <mode>"
+Reencryption resilience mode can be one of \fIchecksum\fR, \fIjournal\fR or \fInone\fR.
+
+\fIchecksum\fR: default mode, where individual checksums of ciphertext hotzone sectors are stored,
+so the recovery process can detect which sectors where already reencrypted. It requires that the device sector write is atomic.
+
+\fIjournal\fR: the hotzone is journaled in the binary area (so the data are written twice).
+
+\fInone\fR: performance mode. There is no protection and the only way it's safe to interrupt
+the reencryption is similar to old offline reencryption utility. (ctrl+c).
+
+The option is ignored if reencryption with datashift mode is in progress.
+.TP
+.B "\-\-resilience-hash <hash>"
+The hash algorithm used with "\-\-resilience checksum" only. The default hash is sha256. With other resilience modes, the hash parameter is ignored.
+.TP
+.B "\-\-hotzone-size <size>"
+This option can be used to set an upper limit on the size of reencryption area (hotzone).
+The <size> can be specified with unit suffix (for example 50M). Note that actual hotzone
+size may be less than specified <size> due to other limitations (free space in keyslots area or
+available memory).
+.TP
+.B "\-\-reduce\-device\-size <size>"
+Initialize LUKS2 reencryption with data device size reduction (currently only \-\-encrypt variant is supported).
+
+Last <size> sectors of <device> will be used to properly initialize device reencryption. That means any
+data at last <size> sectors will be lost.
+
+It could be useful if you added some space to underlying partition or logical volume (so last <size> sectors contains no data).
+
+Recommended minimal size is twice the default LUKS2 header size (\-\-reduce\-device\-size 32M) for \-\-encrypt use case. Be sure to
+have enough (at least \-\-reduce\-device\-size value of free space at the end of <device>).
+
+WARNING: This is a destructive operation and cannot be reverted.  Use with extreme care - accidentally overwritten filesystems are usually unrecoverable.
 .TP
 .B "\-\-version"
 Show the program version.
@@ -1456,6 +1639,9 @@ for integrity protected devices.
 If you want to format LUKS2 device with data integrity protection,
 use \fI\-\-integrity\fR option.
 
+Since dm-integrity doesn't support discards (TRIM), dm-crypt device on top of it
+inherits this, so integrity protection mode doesn't support discards either.
+
 Some integrity modes requires two independent keys (key for encryption
 and for authentication). Both these keys are stored in one LUKS keyslot.
 
@@ -1516,9 +1702,9 @@ Copyright \(co 2004-2006 Clemens Fruhwirth
 .br
 Copyright \(co 2012-2014 Arno Wagner
 .br
-Copyright \(co 2009-2019 Red Hat, Inc.
+Copyright \(co 2009-2020 Red Hat, Inc.
 .br
-Copyright \(co 2009-2019 Milan Broz
+Copyright \(co 2009-2020 Milan Broz
 
 This is free software; see the source for copying conditions.  There is NO
 warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.

@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004 Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2019 Milan Broz
+ * Copyright (C) 2009-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -26,7 +26,6 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <dirent.h>
-#include <fcntl.h>
 #include <errno.h>
 #include <limits.h>
 #include <sys/stat.h>
@@ -111,7 +110,7 @@ static char *lookup_dev_old(int major, int minor)
 		return result;
 
 	/* If it is dm, try DM dir  */
-	if (dm_is_dm_device(major, minor)) {
+	if (dm_is_dm_device(major)) {
 		strncpy(buf, dm_get_dir(), PATH_MAX);
 		if ((result = __lookup_dev(buf, dev, 0, 0)))
 			return result;

@@ -1,7 +1,8 @@
 #!/bin/bash
 
-CRYPTSETUP=../cryptsetup
-REENC=../cryptsetup-reencrypt
+[ -z "$CRYPTSETUP_PATH" ] && CRYPTSETUP_PATH=".."
+CRYPTSETUP=$CRYPTSETUP_PATH/cryptsetup
+REENC=$CRYPTSETUP_PATH/cryptsetup-reencrypt
 FAST_PBKDF="--pbkdf-force-iterations 1000"
 
 DEV_NAME=reenc9768
@@ -16,12 +17,6 @@ PWD3="1-9Qu5Ejfnqv"
 
 MNT_DIR=./mnt_luks
 START_DIR=$(pwd)
-[ -f /etc/system-fips ] && FIPS_MODE=$(cat /proc/sys/crypto/fips_enabled 2>/dev/null)
-
-function fips_mode()
-{
-	[ -n "$FIPS_MODE" ] && [ "$FIPS_MODE" -gt 0 ]
-}
 
 function del_scsi_device()
 {
@@ -31,8 +26,8 @@ function del_scsi_device()
 
 function remove_mapping()
 {
-	[ -b /dev/mapper/$DEV_NAME2 ] && dmsetup remove $DEV_NAME2
-	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove $DEV_NAME
+	[ -b /dev/mapper/$DEV_NAME2 ] && dmsetup remove --retry $DEV_NAME2
+	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove --retry $DEV_NAME
 	[ ! -z "$LOOPDEV1" ] && losetup -d $LOOPDEV1 >/dev/null 2>&1
 	rm -f $IMG $IMG_HDR $ORIG_IMG $KEY1 >/dev/null 2>&1
 	umount $MNT_DIR > /dev/null 2>&1
@@ -44,7 +39,8 @@ function remove_mapping()
 function fail()
 {
 	[ -n "$1" ] && echo "$1"
-	echo "FAILED at line $(caller)"
+	echo "FAILED backtrace:"
+	while caller $frame; do ((frame++)); done
 	cd $START_DIR
 	remove_mapping
 	exit 2
@@ -185,7 +181,14 @@ function mount_and_test() {
 	}
 	rm $MNT_DIR/* 2>/dev/null
 	cd $MNT_DIR
-	echo $PWD2 | $START_DIR/$REENC $LOOPDEV1 -q --use-fsync --use-directio --write-log $FAST_PBKDF || return 1
+
+	if [ "${REENC:0:1}" != "/" ] ; then
+		MNT_REENC=$START_DIR/$REENC
+	else
+		MNT_REENC=$REENC
+	fi
+
+	echo $PWD2 | $MNT_REENC $LOOPDEV1 -q --use-fsync --use-directio --write-log $FAST_PBKDF || return 1
 	cd $START_DIR
 	umount $MNT_DIR
 	echo -n [OK]
@@ -211,7 +214,6 @@ function test_logging() {
 [ $(id -u) != 0 ] && skip "WARNING: You must be root to run this test, test skipped."
 [ ! -x "$REENC" ] && skip "Cannot find $REENC, test skipped."
 which wipefs >/dev/null 2>&1 ||  skip "Cannot find wipefs, test skipped."
-fips_mode && skip "This test cannot be run in FIPS mode."
 
 # REENCRYPTION tests
 
@@ -268,7 +270,7 @@ SIZE=$(blockdev --getsz $LOOPDEV1)
 wipe_dev $LOOPDEV1
 dmsetup create $DEV_NAME2 --table "0 $(($SIZE - $OFFSET)) linear $LOOPDEV1 0" || fail
 check_hash_dev /dev/mapper/$DEV_NAME2 $HASH3
-dmsetup remove $DEV_NAME2 || fail
+dmsetup remove --retry $DEV_NAME2 || fail
 echo $PWD1 | $REENC $LOOPDEV1 -c aes-cbc-essiv:sha256 -s 128 --new --type luks1 --reduce-device-size "$OFFSET"S -q $FAST_PBKDF || fail
 check_hash $PWD1 $HASH3
 $CRYPTSETUP --type luks1 luksDump $LOOPDEV1 > /dev/null || fail
@@ -279,11 +281,15 @@ SIZE=$(blockdev --getsz $LOOPDEV1)
 wipe_dev $LOOPDEV1
 dmsetup create $DEV_NAME2 --table "0 $(($SIZE - $OFFSET)) linear $LOOPDEV1 0" || fail
 check_hash_dev /dev/mapper/$DEV_NAME2 $HASH5
-dmsetup remove $DEV_NAME2 || fail
-echo $PWD1 | $REENC $LOOPDEV1 -c aes-cbc-essiv:sha256 -s 128 --new --type luks1 --reduce-device-size "$OFFSET"S $FAST_PBKDF || fail
+dmsetup remove --retry $DEV_NAME2 || fail
+echo $PWD1 | $REENC $LOOPDEV1 -c aes-cbc-essiv:sha256 -s 128 --new --type luks1 --reduce-device-size "$OFFSET"S -q $FAST_PBKDF || fail
 check_hash $PWD1 $HASH5
 $CRYPTSETUP --type luks1 luksDump $LOOPDEV1 > /dev/null || fail
 prepare 8192
+OFFSET=4096
+echo fake | $REENC $LOOPDEV1 -d $KEY1 --new --type luks1 --reduce-device-size "$OFFSET"S -q $FAST_PBKDF || fail
+$CRYPTSETUP open --test-passphrase $LOOPDEV1 -d $KEY1 || fail
+wipe_dev $LOOPDEV1
 
 echo "[5] Reencryption using specific keyslot"
 echo $PWD2 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF $LOOPDEV1 || fail
@@ -362,7 +368,13 @@ prepare 8192
 echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 $FAST_PBKDF $LOOPDEV1 || fail
 wipe $PWD1
 check_hash $PWD1 $HASH1
-echo $PWD1 | $REENC $LOOPDEV1 -q --decrypt
+echo $PWD1 | $REENC $LOOPDEV1 -q --decrypt || fail
+check_hash_dev $LOOPDEV1 $HASH4
+
+echo $PWD1 | $CRYPTSETUP -q luksFormat --type luks1 -S5 $FAST_PBKDF $LOOPDEV1 || fail
+wipe $PWD1
+check_hash $PWD1 $HASH1
+echo $PWD1 | $REENC $LOOPDEV1 -q --decrypt || fail
 check_hash_dev $LOOPDEV1 $HASH4
 
 echo "[11] Detached header - adding encryption/reencryption/decryption"
