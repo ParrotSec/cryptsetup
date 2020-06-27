@@ -19,9 +19,10 @@ count="$(printf '%s' "$keys" | wc -l)"
 
 if [ -n "$keys" ] && [ $count -le 1 ]; then
     if [ "${keys#:}" = "$keys" ]; then
-        printf '%s' "$keys" | tr -d '\n'
+        printf '%s' "$keys"
+        exit 0
     else
-        echo "$0: device $1 uses the kernel keyring"
+        echo "$0: device $1 uses the kernel keyring" >&2
     fi
 elif [ $count -eq 0 ]; then
     echo "$0: device $1 doesn't exist or isn't a crypto device" >&2

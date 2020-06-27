@@ -2,7 +2,7 @@
  * cryptsetup volume key implementation
  *
  * Copyright (C) 2004-2006 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2010-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Red Hat, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -39,13 +39,15 @@ struct volume_key *crypt_alloc_volume_key(size_t keylength, const char *key)
 
 	vk->key_description = NULL;
 	vk->keylength = keylength;
+	vk->id = -1;
+	vk->next = NULL;
 
 	/* keylength 0 is valid => no key */
 	if (vk->keylength) {
 		if (key)
 			memcpy(&vk->key, key, keylength);
 		else
-			crypt_memzero(&vk->key, keylength);
+			crypt_safe_memzero(&vk->key, keylength);
 	}
 
 	return vk;
@@ -64,13 +66,66 @@ int crypt_volume_key_set_description(struct volume_key *vk, const char *key_desc
 	return 0;
 }
 
+void crypt_volume_key_set_id(struct volume_key *vk, int id)
+{
+	if (vk && id >= 0)
+		vk->id = id;
+}
+
+int crypt_volume_key_get_id(const struct volume_key *vk)
+{
+	return vk ? vk->id : -1;
+}
+
+struct volume_key *crypt_volume_key_by_id(struct volume_key *vks, int id)
+{
+	struct volume_key *vk = vks;
+
+	if (id < 0)
+		return NULL;
+
+	while (vk && vk->id != id)
+		vk = vk->next;
+
+	return vk;
+}
+
+void crypt_volume_key_add_next(struct volume_key **vks, struct volume_key *vk)
+{
+	struct volume_key *tmp;
+
+	if (!vks)
+		return;
+
+	if (!*vks) {
+		*vks = vk;
+		return;
+	}
+
+	tmp = *vks;
+
+	while (tmp->next)
+		tmp = tmp->next;
+
+	tmp->next = vk;
+}
+
+struct volume_key *crypt_volume_key_next(struct volume_key *vk)
+{
+	return vk ? vk->next : NULL;
+}
+
 void crypt_free_volume_key(struct volume_key *vk)
 {
-	if (vk) {
-		crypt_memzero(vk->key, vk->keylength);
+	struct volume_key *vk_next;
+
+	while (vk) {
+		crypt_safe_memzero(vk->key, vk->keylength);
 		vk->keylength = 0;
 		free(CONST_CAST(void*)vk->key_description);
+		vk_next = vk->next;
 		free(vk);
+		vk = vk_next;
 	}
 }
 

@@ -43,8 +43,7 @@ crypttab_foreach_entry copy_keys
 # key-script
 mkdir -p -- "$DESTDIR/etc/opensc" "$DESTDIR/usr/lib/pcsc" "$DESTDIR/var/run" "$DESTDIR/tmp"
 
-# Install pcscd daemon, drivers, conf file, and include libgcc as well since
-# pcscd utilizes pthread_cancel
+# Install pcscd daemon, drivers, conf file
 copy_exec /usr/sbin/pcscd
 LIBC_DIR="$(ldd /usr/sbin/pcscd | sed -nr 's#.* => (/lib.*)/libc\.so\.[0-9.-]+ \(0x[[:xdigit:]]+\)$#\1#p')"
 find -L "$LIBC_DIR" "/usr$LIBC_DIR" -maxdepth 1 \( -name 'libgcc_s.*' -o -name 'libusb-*.so*' -o -name 'libpcsclite.so*' \) -type f | while read so; do

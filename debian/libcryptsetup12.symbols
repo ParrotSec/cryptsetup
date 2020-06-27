@@ -6,6 +6,7 @@ libcryptsetup.so.12 libcryptsetup12 #MINVER#
  crypt_activate_by_keyring@CRYPTSETUP_2.0 2:2.0
  crypt_activate_by_keyfile_device_offset@CRYPTSETUP_2.0 2:2.0.1
  crypt_activate_by_passphrase@CRYPTSETUP_2.0 2:1.4
+ crypt_activate_by_signed_key@CRYPTSETUP_2.0 2:2.3
  crypt_activate_by_token@CRYPTSETUP_2.0 2:2.0
  crypt_activate_by_volume_key@CRYPTSETUP_2.0 2:1.4
  crypt_keyslot_add_by_keyfile_device_offset@CRYPTSETUP_2.0 2:2.0.1
@@ -21,6 +22,7 @@ libcryptsetup.so.12 libcryptsetup12 #MINVER#
  crypt_get_active_integrity_failures@CRYPTSETUP_2.0 2:2.0.3
  crypt_get_cipher@CRYPTSETUP_2.0 2:1.4
  crypt_get_cipher_mode@CRYPTSETUP_2.0 2:1.4
+ crypt_get_compatibility@CRYPTSETUP_2.0 2:2.3
  crypt_get_data_offset@CRYPTSETUP_2.0 2:1.4
  crypt_get_default_type@CRYPTSETUP_2.0 2:2.1
  crypt_get_device_name@CRYPTSETUP_2.0 2:1.4
@@ -68,12 +70,22 @@ libcryptsetup.so.12 libcryptsetup12 #MINVER#
  crypt_metadata_locking@CRYPTSETUP_2.0 2:2.0
  crypt_persistent_flags_get@CRYPTSETUP_2.0 2:2.0
  crypt_persistent_flags_set@CRYPTSETUP_2.0 2:2.0
+ crypt_reencrypt@CRYPTSETUP_2.0 2:2.2
+ crypt_reencrypt_init_by_keyring@CRYPTSETUP_2.0 2:2.2
+ crypt_reencrypt_init_by_passphrase@CRYPTSETUP_2.0 2:2.2
+ crypt_reencrypt_status@CRYPTSETUP_2.0 2:2.2
  crypt_repair@CRYPTSETUP_2.0 2:1.4.3
  crypt_resize@CRYPTSETUP_2.0 2:1.4
  crypt_resume_by_keyfile@CRYPTSETUP_2.0 2:1.4
  crypt_resume_by_keyfile_device_offset@CRYPTSETUP_2.0 2:2.0.1
  crypt_resume_by_keyfile_offset@CRYPTSETUP_2.0 2:1.4.3
  crypt_resume_by_passphrase@CRYPTSETUP_2.0 2:1.4
+ crypt_resume_by_volume_key@CRYPTSETUP_2.0 2:2.3
+ crypt_safe_alloc@CRYPTSETUP_2.0 2:2.3
+ crypt_safe_free@CRYPTSETUP_2.0 2:2.3
+ crypt_safe_memzero@CRYPTSETUP_2.0 2:2.3
+ crypt_safe_realloc@CRYPTSETUP_2.0 2:2.3
+ crypt_set_compatibility@CRYPTSETUP_2.0 2:2.3
  crypt_set_confirm_callback@CRYPTSETUP_2.0 2:1.4
  crypt_set_data_device@CRYPTSETUP_2.0 2:1.4
  crypt_set_data_offset@CRYPTSETUP_2.0 2:2.1

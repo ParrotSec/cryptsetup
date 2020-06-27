@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2, LUKS2 header format code
  *
- * Copyright (C) 2015-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2019 Milan Broz
+ * Copyright (C) 2015-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -39,9 +39,83 @@ static size_t get_min_offset(struct luks2_hdr *hdr)
 	return 2 * hdr->hdr_size;
 }
 
-static size_t get_max_offset(struct crypt_device *cd)
+static size_t get_max_offset(struct luks2_hdr *hdr)
 {
-	return crypt_get_data_offset(cd) * SECTOR_SIZE;
+	return LUKS2_hdr_and_areas_size(hdr->jobj);
+}
+
+int LUKS2_find_area_max_gap(struct crypt_device *cd, struct luks2_hdr *hdr,
+			uint64_t *area_offset, uint64_t *area_length)
+{
+	struct area areas[LUKS2_KEYSLOTS_MAX], sorted_areas[LUKS2_KEYSLOTS_MAX+1] = {};
+	int i, j, k, area_i;
+	size_t valid_offset, offset, length;
+
+	/* fill area offset + length table */
+	for (i = 0; i < LUKS2_KEYSLOTS_MAX; i++) {
+		if (!LUKS2_keyslot_area(hdr, i, &areas[i].offset, &areas[i].length))
+			continue;
+		areas[i].length = 0;
+		areas[i].offset = 0;
+	}
+
+	/* sort table */
+	k = 0; /* index in sorted table */
+	for (i = 0; i < LUKS2_KEYSLOTS_MAX; i++) {
+		offset = get_max_offset(hdr) ?: UINT64_MAX;
+		area_i = -1;
+		/* search for the smallest offset in table */
+		for (j = 0; j < LUKS2_KEYSLOTS_MAX; j++)
+			if (areas[j].offset && areas[j].offset <= offset) {
+				area_i = j;
+				offset = areas[j].offset;
+			}
+
+		if (area_i >= 0) {
+			sorted_areas[k].length = areas[area_i].length;
+			sorted_areas[k].offset = areas[area_i].offset;
+			areas[area_i].length = 0;
+			areas[area_i].offset = 0;
+			k++;
+		}
+	}
+
+	sorted_areas[LUKS2_KEYSLOTS_MAX].offset = get_max_offset(hdr);
+	sorted_areas[LUKS2_KEYSLOTS_MAX].length = 1;
+
+	/* search for the gap we can use */
+	length = valid_offset = 0;
+	offset = get_min_offset(hdr);
+	for (i = 0; i < LUKS2_KEYSLOTS_MAX+1; i++) {
+		/* skip empty */
+		if (sorted_areas[i].offset == 0 || sorted_areas[i].length == 0)
+			continue;
+
+		/* found bigger gap than the last one */
+		if ((offset < sorted_areas[i].offset) && (sorted_areas[i].offset - offset) > length) {
+			length = sorted_areas[i].offset - offset;
+			valid_offset = offset;
+		}
+
+		/* move beyond allocated area */
+		offset = sorted_areas[i].offset + sorted_areas[i].length;
+	}
+
+	/* this search 'algorithm' does not work with unaligned areas */
+	assert(length == size_round_up(length, 4096));
+	assert(valid_offset == size_round_up(valid_offset, 4096));
+
+	if (!length) {
+		log_dbg(cd, "Not enough space in header keyslot area.");
+		return -EINVAL;
+	}
+
+	log_dbg(cd, "Found largest free area %zu -> %zu", valid_offset, length + valid_offset);
+
+	*area_offset = valid_offset;
+	*area_length = length;
+
+	return 0;
 }
 
 int LUKS2_find_area_gap(struct crypt_device *cd, struct luks2_hdr *hdr,
@@ -62,7 +136,7 @@ int LUKS2_find_area_gap(struct crypt_device *cd, struct luks2_hdr *hdr,
 	/* sort table */
 	k = 0; /* index in sorted table */
 	for (i = 0; i < LUKS2_KEYSLOTS_MAX; i++) {
-		offset = get_max_offset(cd) ?: UINT64_MAX;
+		offset = get_max_offset(hdr) ?: UINT64_MAX;
 		area_i = -1;
 		/* search for the smallest offset in table */
 		for (j = 0; j < LUKS2_KEYSLOTS_MAX; j++)
@@ -96,20 +170,13 @@ int LUKS2_find_area_gap(struct crypt_device *cd, struct luks2_hdr *hdr,
 		offset = sorted_areas[i].offset + sorted_areas[i].length;
 	}
 
-	if (get_max_offset(cd) && (offset + length) > get_max_offset(cd)) {
-		log_err(cd, _("No space for new keyslot."));
+	if ((offset + length) > get_max_offset(hdr)) {
+		log_dbg(cd, "Not enough space in header keyslot area.");
 		return -EINVAL;
 	}
 
 	log_dbg(cd, "Found area %zu -> %zu", offset, length + offset);
-/*
-	log_dbg("Area offset min: %zu, max %zu, slots max %u",
-	       get_min_offset(hdr), get_max_offset(cd), LUKS2_KEYSLOTS_MAX);
-	for (i = 0; i < LUKS2_KEYSLOTS_MAX; i++)
-		log_dbg("SLOT[%02i]: %-8" PRIu64 " -> %-8" PRIu64, i,
-			sorted_areas[i].offset,
-			sorted_areas[i].length + sorted_areas[i].offset);
-*/
+
 	*area_offset = offset;
 	*area_length = length;
 	return 0;
@@ -150,6 +217,7 @@ int LUKS2_generate_hdr(
 	char cipher[128];
 	uuid_t partitionUuid;
 	int digest;
+	uint64_t mdev_size;
 
 	if (!metadata_size)
 		metadata_size = LUKS2_HDR_16K_LEN;
@@ -173,6 +241,11 @@ int LUKS2_generate_hdr(
 	if (!keyslots_size) {
 		assert(LUKS2_DEFAULT_HDR_SIZE > 2 * LUKS2_HDR_OFFSET_MAX);
 		keyslots_size = LUKS2_DEFAULT_HDR_SIZE - get_min_offset(hdr);
+		/* Decrease keyslots_size due to metadata device being too small */
+		if (!device_size(crypt_metadata_device(cd), &mdev_size) &&
+		    ((keyslots_size + get_min_offset(hdr)) > mdev_size) &&
+		    device_fallocate(crypt_metadata_device(cd), keyslots_size + get_min_offset(hdr)))
+			keyslots_size = mdev_size - get_min_offset(hdr);
 	}
 
 	/* Decrease keyslots_size if we have smaller data_offset */
@@ -232,25 +305,15 @@ int LUKS2_generate_hdr(
 	json_object_object_add(hdr->jobj, "config", jobj_config);
 
 	digest = LUKS2_digest_create(cd, "pbkdf2", hdr, vk);
-	if (digest < 0) {
-		json_object_put(hdr->jobj);
-		hdr->jobj = NULL;
-		return -EINVAL;
-	}
+	if (digest < 0)
+		goto err;
 
-	if (LUKS2_digest_segment_assign(cd, hdr, CRYPT_DEFAULT_SEGMENT, digest, 1, 0) < 0) {
-		json_object_put(hdr->jobj);
-		hdr->jobj = NULL;
-		return -EINVAL;
-	}
+	if (LUKS2_digest_segment_assign(cd, hdr, 0, digest, 1, 0) < 0)
+		goto err;
 
-	jobj_segment = json_object_new_object();
-	json_object_object_add(jobj_segment, "type", json_object_new_string("crypt"));
-	json_object_object_add(jobj_segment, "offset", json_object_new_uint64(data_offset));
-	json_object_object_add(jobj_segment, "iv_tweak", json_object_new_string("0"));
-	json_object_object_add(jobj_segment, "size", json_object_new_string("dynamic"));
-	json_object_object_add(jobj_segment, "encryption", json_object_new_string(cipher));
-	json_object_object_add(jobj_segment, "sector_size", json_object_new_int(sector_size));
+	jobj_segment = json_segment_create_crypt(data_offset, 0, NULL, cipher, sector_size, 0);
+	if (!jobj_segment)
+		goto err;
 
 	if (integrity) {
 		jobj_integrity = json_object_new_object();
@@ -260,13 +323,17 @@ int LUKS2_generate_hdr(
 		json_object_object_add(jobj_segment, "integrity", jobj_integrity);
 	}
 
-	json_object_object_add_by_uint(jobj_segments, CRYPT_DEFAULT_SEGMENT, jobj_segment);
+	json_object_object_add_by_uint(jobj_segments, 0, jobj_segment);
 
-	json_object_object_add(jobj_config, "json_size", json_object_new_uint64(metadata_size - LUKS2_HDR_BIN_LEN));
-	json_object_object_add(jobj_config, "keyslots_size", json_object_new_uint64(keyslots_size));
+	json_object_object_add(jobj_config, "json_size", crypt_jobj_new_uint64(metadata_size - LUKS2_HDR_BIN_LEN));
+	json_object_object_add(jobj_config, "keyslots_size", crypt_jobj_new_uint64(keyslots_size));
 
 	JSON_DBG(cd, hdr->jobj, "Header JSON:");
 	return 0;
+err:
+	json_object_put(hdr->jobj);
+	hdr->jobj = NULL;
+	return -EINVAL;
 }
 
 int LUKS2_wipe_header_areas(struct crypt_device *cd,
@@ -308,4 +375,31 @@ int LUKS2_wipe_header_areas(struct crypt_device *cd,
 
 	return crypt_wipe_device(cd, crypt_metadata_device(cd), CRYPT_WIPE_RANDOM,
 				 offset, length, wipe_block, NULL, NULL);
+}
+
+/* FIXME: what if user wanted to keep original keyslots size? */
+int LUKS2_set_keyslots_size(struct crypt_device *cd,
+		struct luks2_hdr *hdr,
+		uint64_t data_offset)
+{
+	json_object *jobj_config;
+	uint64_t keyslots_size;
+
+	if (data_offset < get_min_offset(hdr))
+		return 1;
+
+	keyslots_size = data_offset - get_min_offset(hdr);
+
+	/* keep keyslots_size reasonable for custom data alignments */
+	if (keyslots_size > LUKS2_MAX_KEYSLOTS_SIZE)
+		keyslots_size = LUKS2_MAX_KEYSLOTS_SIZE;
+
+	/* keyslots size has to be 4 KiB aligned */
+	keyslots_size -= (keyslots_size % 4096);
+
+	if (!json_object_object_get_ex(hdr->jobj, "config", &jobj_config))
+		return 1;
+
+	json_object_object_add(jobj_config, "keyslots_size", crypt_jobj_new_uint64(keyslots_size));
+	return 0;
 }

@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2
  *
- * Copyright (C) 2015-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2019 Milan Broz
+ * Copyright (C) 2015-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -26,7 +26,7 @@
 /*
  * Helper functions
  */
-json_object *parse_json_len(struct crypt_device *cd, const char *json_area,
+static json_object *parse_json_len(struct crypt_device *cd, const char *json_area,
 			    uint64_t max_length, int *json_len)
 {
 	json_object *jobj;
@@ -210,7 +210,7 @@ static int hdr_disk_sanity_check_pre(struct crypt_device *cd,
 	}
 
 	if (secondary && (offset != be64_to_cpu(hdr->hdr_size))) {
-		log_dbg(cd, "LUKS2 offset 0x%04x in secondary header doesn't match size 0x%04x.",
+		log_dbg(cd, "LUKS2 offset 0x%04x in secondary header does not match size 0x%04x.",
 			(unsigned)offset, (unsigned)be64_to_cpu(hdr->hdr_size));
 		return -EINVAL;
 	}
@@ -233,7 +233,7 @@ static int hdr_read_disk(struct crypt_device *cd,
 			 char **json_area, uint64_t offset, int secondary)
 {
 	size_t hdr_json_size = 0;
-	int devfd = -1, r;
+	int devfd, r;
 
 	log_dbg(cd, "Trying to read %s LUKS2 header at offset 0x%" PRIx64 ".",
 		secondary ? "secondary" : "primary", offset);
@@ -249,13 +249,11 @@ static int hdr_read_disk(struct crypt_device *cd,
 	if (read_lseek_blockwise(devfd, device_block_size(cd, device),
 				 device_alignment(device), hdr_disk,
 				 LUKS2_HDR_BIN_LEN, offset) != LUKS2_HDR_BIN_LEN) {
-		close(devfd);
 		return -EIO;
 	}
 
 	r = hdr_disk_sanity_check_pre(cd, hdr_disk, &hdr_json_size, secondary, offset);
 	if (r < 0) {
-		close(devfd);
 		return r;
 	}
 
@@ -264,20 +262,16 @@ static int hdr_read_disk(struct crypt_device *cd,
 	 */
 	*json_area = malloc(hdr_json_size);
 	if (!*json_area) {
-		close(devfd);
 		return -ENOMEM;
 	}
 
 	if (read_lseek_blockwise(devfd, device_block_size(cd, device),
 				 device_alignment(device), *json_area, hdr_json_size,
 				 offset + LUKS2_HDR_BIN_LEN) != (ssize_t)hdr_json_size) {
-		close(devfd);
 		free(*json_area);
 		*json_area = NULL;
 		return -EIO;
 	}
-
-	close(devfd);
 
 	/*
 	 * Calculate and validate checksum and zero it afterwards.
@@ -302,7 +296,7 @@ static int hdr_write_disk(struct crypt_device *cd,
 	struct luks2_hdr_disk hdr_disk;
 	uint64_t offset = secondary ? hdr->hdr_size : 0;
 	size_t hdr_json_len;
-	int devfd = -1, r;
+	int devfd, r;
 
 	log_dbg(cd, "Trying to write LUKS2 header (%zu bytes) at offset %" PRIu64 ".",
 		hdr->hdr_size, offset);
@@ -323,7 +317,6 @@ static int hdr_write_disk(struct crypt_device *cd,
 	if (write_lseek_blockwise(devfd, device_block_size(cd, device),
 				  device_alignment(device), (char *)&hdr_disk,
 				  LUKS2_HDR_BIN_LEN, offset) < (ssize_t)LUKS2_HDR_BIN_LEN) {
-		close(devfd);
 		return -EIO;
 	}
 
@@ -334,7 +327,6 @@ static int hdr_write_disk(struct crypt_device *cd,
 				  device_alignment(device),
 				  CONST_CAST(char*)json_area, hdr_json_len,
 				  LUKS2_HDR_BIN_LEN + offset) < (ssize_t)hdr_json_len) {
-		close(devfd);
 		return -EIO;
 	}
 
@@ -344,7 +336,6 @@ static int hdr_write_disk(struct crypt_device *cd,
 	r = hdr_checksum_calculate(hdr_disk.checksum_alg, &hdr_disk,
 				   json_area, hdr_json_len);
 	if (r < 0) {
-		close(devfd);
 		return r;
 	}
 	log_dbg_checksum(cd, hdr_disk.csum, hdr_disk.checksum_alg, "in-memory");
@@ -354,16 +345,63 @@ static int hdr_write_disk(struct crypt_device *cd,
 				  LUKS2_HDR_BIN_LEN, offset) < (ssize_t)LUKS2_HDR_BIN_LEN)
 		r = -EIO;
 
-	device_sync(cd, device, devfd);
-	close(devfd);
+	device_sync(cd, device);
 	return r;
+}
+
+static int LUKS2_check_sequence_id(struct crypt_device *cd, struct luks2_hdr *hdr, struct device *device)
+{
+	int devfd;
+	struct luks2_hdr_disk dhdr;
+
+	if (!hdr)
+		return -EINVAL;
+
+	devfd = device_open_locked(cd, device, O_RDONLY);
+	if (devfd < 0)
+		return devfd == -1 ? -EINVAL : devfd;
+
+	/* we need only first 512 bytes, see luks2_hdr_disk structure */
+	if ((read_lseek_blockwise(devfd, device_block_size(cd, device),
+	     device_alignment(device), &dhdr, 512, 0) != 512))
+		return -EIO;
+
+	/* there's nothing to check if there's no LUKS2 header */
+	if ((be16_to_cpu(dhdr.version) != 2) ||
+	    memcmp(dhdr.magic, LUKS2_MAGIC_1ST, LUKS2_MAGIC_L) ||
+	    strcmp(dhdr.uuid, hdr->uuid))
+		return 0;
+
+	return hdr->seqid != be64_to_cpu(dhdr.seqid);
+}
+
+int LUKS2_device_write_lock(struct crypt_device *cd, struct luks2_hdr *hdr, struct device *device)
+{
+	int r = device_write_lock(cd, device);
+
+	if (r < 0) {
+		log_err(cd, _("Failed to acquire write lock on device %s."), device_path(device));
+		return r;
+	}
+
+	/* run sequence id check only on first write lock (r == 1) and w/o LUKS2 reencryption in-progress */
+	if (r == 1 && !crypt_get_reenc_context(cd)) {
+		log_dbg(cd, "Checking context sequence id matches value stored on disk.");
+		if (LUKS2_check_sequence_id(cd, hdr, device)) {
+			device_write_unlock(cd, device);
+			log_err(cd, _("Detected attempt for concurrent LUKS2 metadata update. Aborting operation."));
+			return -EINVAL;
+		}
+	}
+
+	return 0;
 }
 
 /*
  * Convert in-memory LUKS2 header and write it to disk.
  * This will increase sequence id, write both header copies and calculate checksum.
  */
-int LUKS2_disk_hdr_write(struct crypt_device *cd, struct luks2_hdr *hdr, struct device *device)
+int LUKS2_disk_hdr_write(struct crypt_device *cd, struct luks2_hdr *hdr, struct device *device, bool seqid_check)
 {
 	char *json_area;
 	const char *json_text;
@@ -383,10 +421,9 @@ int LUKS2_disk_hdr_write(struct crypt_device *cd, struct luks2_hdr *hdr, struct 
 	 * Allocate and zero JSON area (of proper header size).
 	 */
 	json_area_len = hdr->hdr_size - LUKS2_HDR_BIN_LEN;
-	json_area = malloc(json_area_len);
+	json_area = crypt_zalloc(json_area_len);
 	if (!json_area)
 		return -ENOMEM;
-	memset(json_area, 0, json_area_len);
 
 	/*
 	 * Generate text space-efficient JSON representation to json area.
@@ -405,15 +442,17 @@ int LUKS2_disk_hdr_write(struct crypt_device *cd, struct luks2_hdr *hdr, struct 
 	}
 	strncpy(json_area, json_text, json_area_len);
 
-	/* Increase sequence id before writing it to disk. */
-	hdr->seqid++;
-
-	r = device_write_lock(cd, device);
-	if (r) {
-		log_err(cd, _("Failed to acquire write device lock."));
+	if (seqid_check)
+		r = LUKS2_device_write_lock(cd, hdr, device);
+	else
+		r = device_write_lock(cd, device);
+	if (r < 0) {
 		free(json_area);
 		return r;
 	}
+
+	/* Increase sequence id before writing it to disk. */
+	hdr->seqid++;
 
 	/* Write primary and secondary header */
 	r = hdr_write_disk(cd, device, hdr, json_area, 0);
@@ -424,8 +463,6 @@ int LUKS2_disk_hdr_write(struct crypt_device *cd, struct luks2_hdr *hdr, struct 
 		log_dbg(cd, "LUKS2 header write failed (%d).", r);
 
 	device_write_unlock(cd, device);
-
-	/* FIXME: try recovery here? */
 
 	free(json_area);
 	return r;

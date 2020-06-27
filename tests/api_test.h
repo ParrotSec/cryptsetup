@@ -1,9 +1,9 @@
 /*
  * cryptsetup library API check functions
  *
- * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2019 Milan Broz
- * Copyright (C) 2016-2019 Ondrej Kozina
+ * Copyright (C) 2009-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2020 Milan Broz
+ * Copyright (C) 2016-2020 Ondrej Kozina
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -58,6 +58,7 @@ int _system(const char *command, int warn);
 void register_cleanup(void (*cleanup)(void));
 
 void check_ok(int status, int line, const char *func);
+void check_ok_return(int status, int line, const char *func);
 void check_ko(int status, int line, const char *func);
 void check_equal(int line, const char *func, int64_t x, int64_t y);
 void check_null(int line, const char *func, const void *x);
@@ -67,6 +68,9 @@ void xlog(const char *msg, const char *tst, const char *func, int line, const ch
 /* crypt_device context must be "cd" to parse error properly here */
 #define OK_(x)		do { xlog("(success)", #x, __FUNCTION__, __LINE__, NULL); \
 			     check_ok((x), __LINE__, __FUNCTION__); \
+			} while(0)
+#define NOTFAIL_(x, y)	do { xlog("(notfail)", #x, __FUNCTION__, __LINE__, y); \
+			     check_ok_return((x), __LINE__, __FUNCTION__); \
 			} while(0)
 #define FAIL_(x, y)	do { xlog("(fail)   ", #x, __FUNCTION__, __LINE__, y); \
 			     check_ko((x), __LINE__, __FUNCTION__); \
@@ -84,6 +88,8 @@ void xlog(const char *msg, const char *tst, const char *func, int line, const ch
 #define RUN_(x, y)	do { reset_log(); \
 			     printf("%s: %s\n", #x, (y)); x(); \
 			} while (0)
+
+#define CRYPT_FREE(x) do { crypt_free(x); x = NULL; } while (0)
 
 #define SECTOR_SHIFT 9L
 #define SECTOR_SIZE 512

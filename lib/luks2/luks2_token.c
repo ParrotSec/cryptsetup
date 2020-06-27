@@ -1,8 +1,8 @@
 /*
  * LUKS - Linux Unified Key Setup v2, token handling
  *
- * Copyright (C) 2016-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2016-2019 Milan Broz
+ * Copyright (C) 2016-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2016-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -332,7 +332,7 @@ static void LUKS2_token_buffer_free(struct crypt_device *cd,
 	if (h->buffer_free)
 		h->buffer_free(buffer, buffer_len);
 	else {
-		crypt_memzero(buffer, buffer_len);
+		crypt_safe_memzero(buffer, buffer_len);
 		free(buffer);
 	}
 }
@@ -347,7 +347,7 @@ static int LUKS2_keyslot_open_by_token(struct crypt_device *cd,
 {
 	const crypt_token_handler *h;
 	json_object *jobj_token, *jobj_token_keyslots, *jobj;
-	const char *num = NULL;
+	unsigned int num = 0;
 	int i, r;
 
 	if (!(h = LUKS2_token_handler(cd, token)))
@@ -365,15 +365,15 @@ static int LUKS2_keyslot_open_by_token(struct crypt_device *cd,
 	r = -EINVAL;
 	for (i = 0; i < (int) json_object_array_length(jobj_token_keyslots) && r < 0; i++) {
 		jobj = json_object_array_get_idx(jobj_token_keyslots, i);
-		num = json_object_get_string(jobj);
-		log_dbg(cd, "Trying to open keyslot %s with token %d (type %s).", num, token, h->name);
-		r = LUKS2_keyslot_open(cd, atoi(num), segment, buffer, buffer_len, vk);
+		num = atoi(json_object_get_string(jobj));
+		log_dbg(cd, "Trying to open keyslot %u with token %d (type %s).", num, token, h->name);
+		r = LUKS2_keyslot_open(cd, num, segment, buffer, buffer_len, vk);
 	}
 
-	if (r >= 0 && num)
-		return atoi(num);
+	if (r < 0)
+		return r;
 
-	return r;
+	return num;
 }
 
 int LUKS2_token_open_and_activate(struct crypt_device *cd,
@@ -404,14 +404,16 @@ int LUKS2_token_open_and_activate(struct crypt_device *cd,
 
 	keyslot = r;
 
-	if ((name || (flags & CRYPT_ACTIVATE_KEYRING_KEY)) && crypt_use_keyring_for_vk(cd))
-		r = LUKS2_volume_key_load_in_keyring_by_keyslot(cd, hdr, vk, keyslot);
+	if ((name || (flags & CRYPT_ACTIVATE_KEYRING_KEY)) && crypt_use_keyring_for_vk(cd)) {
+		if (!(r = LUKS2_volume_key_load_in_keyring_by_keyslot(cd, hdr, vk, keyslot)))
+			flags |= CRYPT_ACTIVATE_KEYRING_KEY;
+	}
 
 	if (r >= 0 && name)
 		r = LUKS2_activate(cd, name, vk, flags);
 
-	if (r < 0 && vk)
-		crypt_drop_keyring_key(cd, vk->key_description);
+	if (r < 0)
+		crypt_drop_keyring_key(cd, vk);
 	crypt_free_volume_key(vk);
 
 	return r < 0 ? r : keyslot;
@@ -449,14 +451,16 @@ int LUKS2_token_open_and_activate_any(struct crypt_device *cd,
 
 	keyslot = r;
 
-	if (r >= 0 && (name || (flags & CRYPT_ACTIVATE_KEYRING_KEY)) && crypt_use_keyring_for_vk(cd))
-		r = LUKS2_volume_key_load_in_keyring_by_keyslot(cd, hdr, vk, keyslot);
+	if (r >= 0 && (name || (flags & CRYPT_ACTIVATE_KEYRING_KEY)) && crypt_use_keyring_for_vk(cd)) {
+		if (!(r = LUKS2_volume_key_load_in_keyring_by_keyslot(cd, hdr, vk, keyslot)))
+			flags |= CRYPT_ACTIVATE_KEYRING_KEY;
+	}
 
 	if (r >= 0 && name)
 		r = LUKS2_activate(cd, name, vk, flags);
 
-	if (r < 0 && vk)
-		crypt_drop_keyring_key(cd, vk->key_description);
+	if (r < 0)
+		crypt_drop_keyring_key(cd, vk);
 	crypt_free_volume_key(vk);
 
 	return r < 0 ? r : keyslot;

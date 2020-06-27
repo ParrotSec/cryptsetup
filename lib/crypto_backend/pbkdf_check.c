@@ -1,8 +1,8 @@
 /*
  * PBKDF performance check
- * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2019 Milan Broz
- * Copyright (C) 2016-2019 Ondrej Mosnacek
+ * Copyright (C) 2012-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2020 Milan Broz
+ * Copyright (C) 2016-2020 Ondrej Mosnacek
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -26,6 +26,10 @@
 #include <sys/time.h>
 #include <sys/resource.h>
 #include "crypto_backend.h"
+
+#ifndef CLOCK_MONOTONIC_RAW
+#define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
+#endif
 
 #define BENCH_MIN_MS 250
 #define BENCH_MIN_MS_FAST 10
@@ -151,7 +155,7 @@ static int next_argon2_params(uint32_t *t_cost, uint32_t *m_cost,
 	old_t_cost = *t_cost;
 	old_m_cost = *m_cost;
 
-	if (ms > target_ms) {
+	if ((uint32_t)ms > target_ms) {
 		/* decreasing, first try to lower t_cost, then m_cost */
 		num = (uint64_t)*t_cost * (uint64_t)target_ms;
 		denom = (uint64_t)ms;

@@ -1,3 +1,4 @@
+---
 include:
   - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/salsa-ci.yml
   - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/pipeline-jobs.yml
@@ -19,6 +20,7 @@ reprotest:
 # Add a deploy stage for pages
 stages:
   - build
+  - publish
   - test
   - deploy
 
@@ -37,7 +39,8 @@ pages:
     - for readme in Debian debug gnupg gnupg-sc initramfs keyctl opensc; do
           ${PANDOC} --toc -T "Debian Cryptsetup docs"
           -o public/README.$readme.html debian/README.$readme; done
-    - ${PANDOC} -o public/encrypted-boot.html debian/doc/pandoc/encrypted-boot.md
+    - ${PANDOC} -pNo public/encrypted-boot.html
+          debian/doc/pandoc/encrypted-boot.md
   stage: deploy
   artifacts:
     paths:
@@ -50,4 +53,5 @@ pages:
     #variables:
     #  - $CI_COMMIT_TAG
   variables:
-    PANDOC: 'pandoc -s -c pandoc.css -f markdown -t html'
+    # --smart/-S has been removed in Buster.  Use '-f markdown+smart' instead.
+    PANDOC: 'pandoc -sS -c pandoc.css -f markdown -t html'

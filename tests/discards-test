@@ -1,12 +1,13 @@
 #!/bin/bash
 
-CRYPTSETUP="../cryptsetup"
+[ -z "$CRYPTSETUP_PATH" ] && CRYPTSETUP_PATH=".."
+CRYPTSETUP=$CRYPTSETUP_PATH/cryptsetup
 DEV_NAME="discard-t3st"
 DEV=""
 PWD1="93R4P4pIqAH8"
 
 cleanup() {
-	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove $DEV_NAME
+	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove --retry $DEV_NAME
 	udevadm settle >/dev/null 2>&1
 	rmmod scsi_debug 2>/dev/null
 	sleep 2
@@ -14,7 +15,8 @@ cleanup() {
 
 fail()
 {
-	echo "FAILED at line $(caller)"
+	echo "FAILED backtrace:"
+	while caller $frame; do ((frame++)); done
 	cleanup
 	exit 100
 }

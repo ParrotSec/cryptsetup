@@ -2,18 +2,19 @@ Source: cryptsetup
 Section: admin
 Priority: optional
 XSBC-Original-Maintainer: Debian Cryptsetup Team <pkg-cryptsetup-devel@alioth-lists.debian.net>
-Maintainer: Kali Developers <devel@kali.org>
-Uploaders: Jonas Meurer <jonas@freesources.org>,
-           Guilhem Moulin <guilhem@debian.org>
+Maintainer: Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>
+Uploaders: Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>
+Rules-Requires-Root: no
 Build-Depends: autoconf,
                automake (>= 1:1.12),
                autopoint,
-               debhelper (>= 11~),
+               debhelper-compat (= 13),
                dh-exec,
                dh-strip-nondeterminism,
                docbook-xml,
                docbook-xsl,
                gettext,
+               jq,
                libargon2-dev,
                libblkid-dev,
                libdevmapper-dev,
@@ -25,22 +26,26 @@ Build-Depends: autoconf,
                libtool,
                pkg-config,
                po-debconf,
+               procps,
                uuid-dev,
-               xsltproc
-Standards-Version: 4.3.0
+               xsltproc,
+               xxd
+Standards-Version: 4.5.0
 Homepage: https://gitlab.com/cryptsetup/cryptsetup
-Vcs-Browser: https://gitlab.com/kalilinux/packages/cryptsetup
-Vcs-Git: https://gitlab.com/kalilinux/packages/cryptsetup.git
+Vcs-Browser: https://nest.parrotsec.org/packages/debian/cryptsetup
+Vcs-Git: https://nest.parrotsec.org/packages/debian/cryptsetup.git
 
-Package: cryptsetup-run
+Package: cryptsetup
 Architecture: linux-any
+Multi-Arch: foreign
 Depends: cryptsetup-bin (>= 2:1.6.0),
          dmsetup,
          ${misc:Depends},
          ${shlibs:Depends}
 Suggests: dosfstools, keyutils, liblocale-gettext-perl
-Replaces: cryptsetup (<< 2:2.0.3-1), cryptsetup-bin (<< 2:2.0.3-2)
-Breaks: cryptsetup (<< 2:2.0.3-1), cryptsetup-bin (<< 2:2.0.3-2)
+Replaces: cryptsetup-run (<< 2:2.1.0-6)
+Recommends: cryptsetup-initramfs, cryptsetup-run
+Breaks: cryptsetup-run (<< 2:2.1.0-6)
 Description: disk encryption support - startup scripts
  Cryptsetup provides an interface for configuring encryption on block
  devices (such as /home or swap partitions), using the Linux kernel
@@ -58,6 +63,7 @@ Description: disk encryption support - startup scripts
 
 Package: cryptsetup-bin
 Architecture: linux-any
+Multi-Arch: foreign
 Depends: ${misc:Depends}, ${shlibs:Depends}
 Description: disk encryption support - command line tools
  Cryptsetup provides an interface for configuring encryption on block
@@ -71,7 +77,7 @@ Description: disk encryption support - command line tools
 Package: cryptsetup-initramfs
 Architecture: all
 Depends: busybox | busybox-static,
-         cryptsetup-run (>= ${source:Version}),
+         cryptsetup (>= ${source:Version}),
          initramfs-tools (>= 0.129) | linux-initramfs-tool,
          ${misc:Depends}
 Recommends: console-setup, kbd, cryptsetup-nuke-password
@@ -85,16 +91,15 @@ Description: disk encryption support - initramfs integration
  .
  This package provides initramfs integration for cryptsetup.
 
-Package: cryptsetup
-Architecture: all
+Package: cryptsetup-run
 Section: oldlibs
-Depends: cryptsetup-initramfs (>= 2:2.0.3-1),
-         cryptsetup-run (>= 2:2.0.3-1),
-         ${misc:Depends}
-Description: transitional dummy package for cryptsetup-{run,initramfs}
+Architecture: all
+Multi-Arch: foreign
+Depends: cryptsetup (>= 2:2.1.0-6), ${misc:Depends}
+Description: transitional dummy package for cryptsetup
  This is a transitional dummy package to get upgrading systems to install the
- cryptsetup-run and cryptsetup-initramfs packages. It can safely be removed
- once no other package depends on it.
+ cryptsetup package. It can safely be removed once no other package depends on
+ it.
 
 Package: libcryptsetup12
 Section: libs

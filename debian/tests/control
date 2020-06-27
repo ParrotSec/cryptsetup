@@ -1,2 +1,0 @@
-Tests: test-nuke-feature.sh
-Restrictions: needs-root, allow-stderr

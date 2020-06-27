@@ -1,7 +1,7 @@
 /*
  * cryptsetup kernel RNG access functions
  *
- * Copyright (C) 2010-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2010-2020 Red Hat, Inc. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -20,17 +20,12 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
 #include <errno.h>
 #include <assert.h>
 #include <sys/select.h>
 
 #include "libcryptsetup.h"
 #include "internal.h"
-
-#ifndef O_CLOEXEC
-#define O_CLOEXEC 0
-#endif
 
 static int random_initialised = 0;
 

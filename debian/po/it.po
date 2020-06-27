@@ -18,19 +18,19 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../cryptsetup-run.templates:1001
+#: ../cryptsetup.templates:1001
 msgid "Continue with cryptsetup removal?"
 msgstr "Continuare con la rimozione di cryptsetup?"
 
 #. Type: boolean
 #. Description
-#: ../cryptsetup-run.templates:1001
+#: ../cryptsetup.templates:1001
 msgid "This system has unlocked dm-crypt devices: ${cryptmap}"
 msgstr "I seguenti device dm-crypt sono sbloccati: ${cryptmap}"
 
 #. Type: boolean
 #. Description
-#: ../cryptsetup-run.templates:1001
+#: ../cryptsetup.templates:1001
 msgid ""
 "If these devices are managed with cryptsetup, you might be unable to lock "
 "the devices after the package removal, though other tools can be used for "
@@ -44,7 +44,7 @@ msgstr ""
 
 #. Type: boolean
 #. Description
-#: ../cryptsetup-run.templates:1001
+#: ../cryptsetup.templates:1001
 msgid ""
 "Do not choose this option if you want to lock the dm-crypt devices before "
 "package removal."

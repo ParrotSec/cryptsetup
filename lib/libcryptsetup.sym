@@ -12,6 +12,9 @@ CRYPTSETUP_2.0 {
 		crypt_set_label;
 		crypt_set_data_device;
 
+		crypt_set_compatibility;
+		crypt_get_compatibility;
+
 		crypt_memory_lock;
 		crypt_metadata_locking;
 		crypt_format;
@@ -24,6 +27,7 @@ CRYPTSETUP_2.0 {
 		crypt_resume_by_keyfile;
 		crypt_resume_by_keyfile_offset;
 		crypt_resume_by_keyfile_device_offset;
+		crypt_resume_by_volume_key;
 		crypt_free;
 
 		crypt_keyslot_add_by_passphrase;
@@ -55,6 +59,7 @@ CRYPTSETUP_2.0 {
 		crypt_activate_by_keyfile_offset;
 		crypt_activate_by_keyfile_device_offset;
 		crypt_activate_by_volume_key;
+		crypt_activate_by_signed_key;
 		crypt_activate_by_keyring;
 		crypt_deactivate;
 		crypt_deactivate_by_name;
@@ -113,6 +118,16 @@ CRYPTSETUP_2.0 {
 		crypt_keyfile_device_read;
 
 		crypt_wipe;
+
+		crypt_reencrypt_init_by_passphrase;
+		crypt_reencrypt_init_by_keyring;
+		crypt_reencrypt;
+		crypt_reencrypt_status;
+
+		crypt_safe_alloc;
+		crypt_safe_realloc;
+		crypt_safe_free;
+		crypt_safe_memzero;
 	local:
 		*;
 };

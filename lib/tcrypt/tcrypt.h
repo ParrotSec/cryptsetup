@@ -1,8 +1,8 @@
 /*
- * TCRYPT (TrueCrypt-compatible)  header defitinion
+ * TCRYPT (TrueCrypt-compatible)  header definition
  *
- * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2019 Milan Broz
+ * Copyright (C) 2012-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2020 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -42,6 +42,7 @@
 
 #define TCRYPT_LRW_IKEY_LEN 16
 #define TCRYPT_KEY_POOL_LEN 64
+#define VCRYPT_KEY_POOL_LEN 128
 #define TCRYPT_KEYFILE_LEN  1048576
 
 #define TCRYPT_HDR_FLAG_SYSTEM    (1 << 0)

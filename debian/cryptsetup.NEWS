@@ -1,3 +1,21 @@
+cryptsetup (2:2.1.0-7) unstable; urgency=low
+
+    The 'cryptsetup' and 'cryptsetup-run' packages have been swapped:
+    'cryptsetup' now contains init scripts, libraries, keyscripts, etc.,
+    while 'cryptsetup-run' is a transitional dummy package depending on
+    'cryptsetup'.
+
+    On systems which do rely on the initramfs integration, one can mark
+    'cryptsetup-initramfs' as being manually installed (so APT never
+    selects it for auto-removal) with the following command:
+
+        apt-mark manual cryptsetup-initramfs
+
+    On the other hand, the 'cryptsetup-initramfs' package can be safely
+    removed on systems not relying on initramfs integration.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sun, 21 Jul 2019 17:08:52 -0300
+
 cryptsetup (2:2.0.3-2) unstable; urgency=medium
 
     The 'decrypt_openct' keyscript has been removed, since openct itself

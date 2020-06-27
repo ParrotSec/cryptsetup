@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004 Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2019 Milan Broz
+ * Copyright (C) 2009-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -27,8 +27,10 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <fcntl.h>
 
 #include "nls.h"
 #include "bitops.h"
@@ -40,6 +42,7 @@
 #include "utils_keyring.h"
 #include "utils_io.h"
 #include "crypto_backend.h"
+#include "utils_storage_wrappers.h"
 
 #include "libcryptsetup.h"
 
@@ -53,6 +56,9 @@
 #define DEFAULT_DISK_ALIGNMENT	1048576 /* 1MiB */
 #define DEFAULT_MEM_ALIGNMENT	4096
 #define LOG_MAX_LEN		4096
+#define MAX_DM_DEPS		32
+
+#define CRYPT_SUBDEV           "SUBDEV" /* prefix for sublayered devices underneath public crypt types */
 
 #define at_least(a, b) ({ __typeof__(a) __at_least = (a); (__at_least >= (b))?__at_least:(b); })
 
@@ -72,11 +78,18 @@
 		*_py = NULL; \
 	} while (0)
 
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
+
 struct crypt_device;
+struct luks2_reenc_context;
 
 struct volume_key {
+	int id;
 	size_t keylength;
 	const char *key_description;
+	struct volume_key *next;
 	char key[];
 };
 
@@ -84,6 +97,11 @@ struct volume_key *crypt_alloc_volume_key(size_t keylength, const char *key);
 struct volume_key *crypt_generate_volume_key(struct crypt_device *cd, size_t keylength);
 void crypt_free_volume_key(struct volume_key *vk);
 int crypt_volume_key_set_description(struct volume_key *key, const char *key_description);
+void crypt_volume_key_set_id(struct volume_key *vk, int id);
+int crypt_volume_key_get_id(const struct volume_key *vk);
+void crypt_volume_key_add_next(struct volume_key **vks, struct volume_key *vk);
+struct volume_key *crypt_volume_key_next(struct volume_key *vk);
+struct volume_key *crypt_volume_key_by_id(struct volume_key *vk, int id);
 
 struct crypt_pbkdf_type *crypt_get_pbkdf(struct crypt_device *cd);
 int init_pbkdf_type(struct crypt_device *cd,
@@ -100,6 +118,7 @@ const char *crypt_get_cipher_spec(struct crypt_device *cd);
 struct device;
 int device_alloc(struct crypt_device *cd, struct device **device, const char *path);
 int device_alloc_no_check(struct device **device, const char *path);
+void device_close(struct crypt_device *cd, struct device *device);
 void device_free(struct crypt_device *cd, struct device *device);
 const char *device_path(const struct device *device);
 const char *device_dm_name(const struct device *device);
@@ -113,13 +132,15 @@ size_t device_block_size(struct crypt_device *cd, struct device *device);
 int device_read_ahead(struct device *device, uint32_t *read_ahead);
 int device_size(struct device *device, uint64_t *size);
 int device_open(struct crypt_device *cd, struct device *device, int flags);
+int device_open_excl(struct crypt_device *cd, struct device *device, int flags);
+void device_release_excl(struct crypt_device *cd, struct device *device);
 void device_disable_direct_io(struct device *device);
 int device_is_identical(struct device *device1, struct device *device2);
 int device_is_rotational(struct device *device);
 size_t device_alignment(struct device *device);
 int device_direct_io(const struct device *device);
 int device_fallocate(struct device *device, uint64_t size);
-void device_sync(struct crypt_device *cd, struct device *device, int devfd);
+void device_sync(struct crypt_device *cd, struct device *device);
 int device_check_size(struct crypt_device *cd,
 		      struct device *device,
 		      uint64_t req_offset, int falloc);
@@ -129,6 +150,7 @@ int device_read_lock(struct crypt_device *cd, struct device *device);
 int device_write_lock(struct crypt_device *cd, struct device *device);
 void device_read_unlock(struct crypt_device *cd, struct device *device);
 void device_write_unlock(struct crypt_device *cd, struct device *device);
+bool device_is_locked(struct device *device);
 
 enum devcheck { DEV_OK = 0, DEV_EXCL = 1 };
 int device_check_access(struct crypt_device *cd,
@@ -163,6 +185,7 @@ char *crypt_get_base_device(const char *dev_path);
 uint64_t crypt_dev_partition_offset(const char *dev_path);
 int lookup_by_disk_id(const char *dm_uuid);
 int lookup_by_sysfs_uuid_field(const char *dm_uuid, size_t max_len);
+int crypt_uuid_cmp(const char *dm_uuid, const char *hdr_uuid);
 
 size_t crypt_getpagesize(void);
 unsigned crypt_cpusonline(void);
@@ -199,6 +222,11 @@ int PLAIN_activate(struct crypt_device *cd,
 		     uint32_t flags);
 
 void *crypt_get_hdr(struct crypt_device *cd, const char *type);
+void crypt_set_reenc_context(struct crypt_device *cd, struct luks2_reenc_context *rh);
+struct luks2_reenc_context *crypt_get_reenc_context(struct crypt_device *cd);
+
+int onlyLUKS2(struct crypt_device *cd);
+int onlyLUKS2mask(struct crypt_device *cd, uint32_t mask);
 
 int crypt_wipe_device(struct crypt_device *cd,
 	struct device *device,
@@ -218,7 +246,8 @@ int crypt_key_in_keyring(struct crypt_device *cd);
 void crypt_set_key_in_keyring(struct crypt_device *cd, unsigned key_in_keyring);
 int crypt_volume_key_load_in_keyring(struct crypt_device *cd, struct volume_key *vk);
 int crypt_use_keyring_for_vk(struct crypt_device *cd);
-void crypt_drop_keyring_key(struct crypt_device *cd, const char *key_description);
+void crypt_drop_keyring_key_by_description(struct crypt_device *cd, const char *key_description, key_type_t ktype);
+void crypt_drop_keyring_key(struct crypt_device *cd, struct volume_key *vks);
 
 static inline uint64_t version(uint16_t major, uint16_t minor, uint16_t patch, uint16_t release)
 {
@@ -226,5 +255,15 @@ static inline uint64_t version(uint16_t major, uint16_t minor, uint16_t patch, u
 }
 
 int kernel_version(uint64_t *kversion);
+
+int crypt_serialize_lock(struct crypt_device *cd);
+void crypt_serialize_unlock(struct crypt_device *cd);
+
+bool crypt_string_in(const char *str, char **list, size_t list_size);
+int crypt_strcmp(const char *a, const char *b);
+int crypt_compare_dm_devices(struct crypt_device *cd,
+			       const struct crypt_dm_active_device *src,
+			       const struct crypt_dm_active_device *tgt);
+static inline void *crypt_zalloc(size_t size) { return calloc(1, size); }
 
 #endif /* INTERNAL_H */

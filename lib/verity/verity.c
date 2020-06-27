@@ -1,7 +1,7 @@
 /*
  * dm-verity volume handling
  *
- * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2020 Red Hat, Inc. All rights reserved.
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -25,7 +25,6 @@
 #include <stdint.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <uuid/uuid.h>
 
@@ -60,13 +59,13 @@ int VERITY_read_sb(struct crypt_device *cd,
 	struct device *device = crypt_metadata_device(cd);
 	struct verity_sb sb = {};
 	ssize_t hdr_size = sizeof(struct verity_sb);
-	int devfd = 0, sb_version;
+	int devfd, sb_version;
 
 	log_dbg(cd, "Reading VERITY header of size %zu on device %s, offset %" PRIu64 ".",
 		sizeof(struct verity_sb), device_path(device), sb_offset);
 
 	if (params->flags & CRYPT_VERITY_NO_HEADER) {
-		log_err(cd, _("Verity device %s doesn't use on-disk header."),
+		log_err(cd, _("Verity device %s does not use on-disk header."),
 			device_path(device));
 		return -EINVAL;
 	}
@@ -84,11 +83,8 @@ int VERITY_read_sb(struct crypt_device *cd,
 
 	if (read_lseek_blockwise(devfd, device_block_size(cd, device),
 				 device_alignment(device), &sb, hdr_size,
-				 sb_offset) < hdr_size) {
-		close(devfd);
+				 sb_offset) < hdr_size)
 		return -EIO;
-	}
-	close(devfd);
 
 	if (memcmp(sb.signature, VERITY_SIGNATURE, sizeof(sb.signature))) {
 		log_err(cd, _("Device %s is not a valid VERITY device."),
@@ -160,7 +156,7 @@ int VERITY_write_sb(struct crypt_device *cd,
 	ssize_t hdr_size = sizeof(struct verity_sb);
 	char *algorithm;
 	uuid_t uuid;
-	int r, devfd = 0;
+	int r, devfd;
 
 	log_dbg(cd, "Updating VERITY header of size %zu on device %s, offset %" PRIu64 ".",
 		sizeof(struct verity_sb), device_path(device), sb_offset);
@@ -172,7 +168,7 @@ int VERITY_write_sb(struct crypt_device *cd,
 	}
 
 	if (params->flags & CRYPT_VERITY_NO_HEADER) {
-		log_err(cd, _("Verity device %s doesn't use on-disk header."),
+		log_err(cd, _("Verity device %s does not use on-disk header."),
 			device_path(device));
 		return -EINVAL;
 	}
@@ -202,8 +198,7 @@ int VERITY_write_sb(struct crypt_device *cd,
 		log_err(cd, _("Error during update of verity header on device %s."),
 			device_path(device));
 
-	device_sync(cd, device, devfd);
-	close(devfd);
+	device_sync(cd, device);
 
 	return r;
 }
@@ -239,6 +234,7 @@ int VERITY_activate(struct crypt_device *cd,
 		     const char *name,
 		     const char *root_hash,
 		     size_t root_hash_size,
+		     const char *signature_description,
 		     struct device *fec_device,
 		     struct crypt_params_verity *verity_hdr,
 		     uint32_t activation_flags)
@@ -256,6 +252,11 @@ int VERITY_activate(struct crypt_device *cd,
 		name ?: "[none]", verity_hdr->hash_name);
 
 	if (verity_hdr->flags & CRYPT_VERITY_CHECK_HASH) {
+		if (signature_description) {
+			log_err(cd, _("Root hash signature verification is not supported."));
+			return -EINVAL;
+		}
+
 		log_dbg(cd, "Verification of data in userspace required.");
 		r = VERITY_verify(cd, verity_hdr, root_hash, root_hash_size);
 
@@ -295,7 +296,8 @@ int VERITY_activate(struct crypt_device *cd,
 
 	r = dm_verity_target_set(&dmd.segment, 0, dmd.size, crypt_data_device(cd),
 			crypt_metadata_device(cd), fec_device, root_hash,
-			root_hash_size, VERITY_hash_offset_block(verity_hdr),
+			root_hash_size, signature_description,
+			VERITY_hash_offset_block(verity_hdr),
 			VERITY_hash_blocks(cd, verity_hdr), verity_hdr);
 
 	if (r)
@@ -303,7 +305,11 @@ int VERITY_activate(struct crypt_device *cd,
 
 	r = dm_create_device(cd, name, CRYPT_VERITY, &dmd);
 	if (r < 0 && (dm_flags(cd, DM_VERITY, &dmv_flags) || !(dmv_flags & DM_VERITY_SUPPORTED))) {
-		log_err(cd, _("Kernel doesn't support dm-verity mapping."));
+		log_err(cd, _("Kernel does not support dm-verity mapping."));
+		r = -ENOTSUP;
+	}
+	if (r < 0 && signature_description && !(dmv_flags & DM_VERITY_SIGNATURE_SUPPORTED)) {
+		log_err(cd, _("Kernel does not support dm-verity signature option."));
 		r = -ENOTSUP;
 	}
 	if (r < 0)

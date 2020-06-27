@@ -1,0 +1,120 @@
+#!/bin/bash
+
+# check bitlk images parsing
+
+[ -z "$CRYPTSETUP_PATH" ] && CRYPTSETUP_PATH=".."
+CRYPTSETUP=$CRYPTSETUP_PATH/cryptsetup
+TST_DIR=bitlk-images
+MAP=bitlktst
+
+[ -z "$srcdir" ] && srcdir="."
+
+function remove_mapping()
+{
+	[ -b /dev/mapper/$MAP ] && dmsetup remove --retry $MAP
+}
+
+function fail()
+{
+	[ -n "$1" ] && echo "$1"
+	echo " [FAILED]"
+	echo "FAILED backtrace:"
+	while caller $frame; do ((frame++)); done
+	remove_mapping
+	exit 2
+}
+
+function skip()
+{
+	[ -n "$1" ] && echo "$1"
+	echo "Test skipped."
+	exit 77
+}
+
+function load_vars()
+{
+        local file=$(echo $1 | sed -e s/^$TST_DIR\\/// | sed -e s/\.img$//)
+        source <(grep = <(grep -A8 "\[$file\]" $TST_DIR/images.conf))
+}
+
+function check_dump()
+{
+        dump=$1
+        file=$2
+
+        # load variables for this image from config file
+        load_vars $file
+
+        # GUID
+        dump_guid=$(echo "$dump" | grep Version -A 1 | tail -1 | cut -d: -f2 | tr -d "\t\n ")
+        [ ! -z "$GUID" -a "$dump_guid" = "$GUID"  ] || fail " GUID check from dump failed."
+
+        # cipher
+        dump_cipher=$(echo "$dump" | grep "Cipher name" | cut -d: -f2 | tr -d "\t\n ")
+        dump_mode=$(echo "$dump" | grep "Cipher mode" | cut -d: -f2 | tr -d "\t\n ")
+        cipher=$(echo "$dump_cipher-$dump_mode")
+        [ ! -z "$CIPHER" -a "$cipher" = "$CIPHER" ] || fail " cipher check from dump failed."
+
+        if echo "$file" | grep -q -e "smart-card"; then
+                # smart card protected VMK GUID
+                dump_sc_vmk=$(echo "$dump" | grep "VMK protected with smart card" -B 1 | head -1 | cut -d: -f2 | tr -d "\t ")
+                [ ! -z "$SC_VMK_GUID" -a "$dump_sc_vmk" = "$SC_VMK_GUID" ] || fail " smart card protected VMK GUID check from dump failed."
+        else
+                # password protected VMK GUID
+                dump_pw_vmk=$(echo "$dump" | grep "VMK protected with passphrase" -B 1 | head -1 | cut -d: -f2 | tr -d "\t ")
+                [ ! -z "$PW_VMK_GUID" -a "$dump_pw_vmk" = "$PW_VMK_GUID" ] || fail " password protected VMK GUID check from dump failed."
+        fi
+
+        # recovery password protected VMK GUID
+        dump_rp_vmk=$(echo "$dump" | grep "VMK protected with recovery passphrase" -B 1 | head -1 | cut -d: -f2 | tr -d "\t ")
+        [ ! -z "$RP_VMK_GUID" -a "$dump_rp_vmk" = "$RP_VMK_GUID" ] || fail " recovery password protected VMK GUID check from dump failed."
+
+}
+
+export LANG=C
+[ ! -d $TST_DIR ] && tar xJSf $srcdir/bitlk-images.tar.xz --no-same-owner
+
+echo "HEADER CHECK"
+for file in $(ls $TST_DIR/bitlk-*) ; do
+	echo -n " $file"
+	out=$($CRYPTSETUP bitlkDump $file)
+        check_dump "$out" "$file"
+	echo " [OK]"
+done
+
+if [ $(id -u) != 0 ]; then
+	echo "WARNING: You must be root to run activation part of test, test skipped."
+	exit 0
+fi
+
+remove_mapping
+
+echo "ACTIVATION FS UUID CHECK"
+for file in $(ls $TST_DIR/bitlk-*) ; do
+	# load variables for this image from config file
+        load_vars $file
+
+	# test with both passphrase and recovery passphrase
+	for PASSPHRASE in $PW $RP ; do
+		echo -n " $file"
+		echo $PASSPHRASE | $CRYPTSETUP bitlkOpen -r $file --test-passphrase >/dev/null 2>&1
+		ret=$?
+		[ $ret -eq 1 ] && echo " [N/A]" && continue
+		echo $PASSPHRASE | $CRYPTSETUP bitlkOpen -r $file $MAP >/dev/null 2>&1
+		ret=$?
+		[ $ret -eq 1 ] && ( echo "$file" | grep -q -e "aes-cbc" ) && echo " [N/A]" && continue
+		[ $ret -eq 1 ] && ( echo "$file" | grep -q -e "aes-cbc-elephant" ) && echo " [N/A]" && continue
+		[ $ret -eq 1 ] && ( echo "$file" | grep -q -e "clearkey" ) && echo " [N/A]" && continue
+		[ $ret -eq 1 ] && ( echo "$file" | grep -q -e "eow" ) && echo " [N/A]" && continue
+		[ $ret -eq 1 ] && ( echo "$file" | grep -q -e "-4k.img" ) && echo " [N/A]" && continue
+		[ $ret -eq 0 ] || fail " failed to open $file ($ret)"
+		$CRYPTSETUP status $MAP >/dev/null || fail
+		$CRYPTSETUP status /dev/mapper/$MAP >/dev/null || fail
+		uuid=$(lsblk -n -o UUID /dev/mapper/$MAP)
+		sha256sum=$(sha256sum /dev/mapper/$MAP | cut -d" " -f1)
+		$CRYPTSETUP remove $MAP || fail
+		[ "$uuid" = "$UUID" ] || fail " UUID check failed."
+		[ "$sha256sum" = "$SHA256SUM" ] || fail " SHA256 sum check failed."
+		echo " [OK]"
+	done
+done

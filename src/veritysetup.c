@@ -1,8 +1,8 @@
 /*
  * veritysetup - setup cryptographic volumes for dm-verity
  *
- * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2019 Milan Broz
+ * Copyright (C) 2012-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -40,8 +40,7 @@ static int opt_restart_on_corruption = 0;
 static int opt_ignore_corruption = 0;
 static int opt_ignore_zero_blocks = 0;
 static int opt_check_at_most_once = 0;
-
-static int opt_version_mode = 0;
+static const char *opt_root_hash_signature = NULL;
 
 static const char **action_argv;
 static int action_argc;
@@ -143,7 +142,9 @@ static int _activate(const char *dm_device,
 	uint32_t activate_flags = CRYPT_ACTIVATE_READONLY;
 	char *root_hash_bytes = NULL;
 	ssize_t hash_size;
-	int r;
+	struct stat st;
+	char *signature = NULL;
+	int signature_size = 0, r;
 
 	if ((r = crypt_init_data_device(&cd, hash_device, data_device)))
 		goto out;
@@ -179,11 +180,28 @@ static int _activate(const char *dm_device,
 		r = -EINVAL;
 		goto out;
 	}
-	r = crypt_activate_by_volume_key(cd, dm_device,
+
+	if (opt_root_hash_signature) {
+		// FIXME: check max file size
+		if (stat(opt_root_hash_signature, &st) || !S_ISREG(st.st_mode) || !st.st_size) {
+			log_err(_("Invalid signature file %s."), opt_root_hash_signature);
+			r = -EINVAL;
+			goto out;
+		}
+		signature_size = st.st_size;
+		r = tools_read_mk(opt_root_hash_signature, &signature, signature_size);
+		if (r < 0) {
+			log_err(_("Cannot read signature file %s."), opt_root_hash_signature);
+			goto out;
+		}
+	}
+	r = crypt_activate_by_signed_key(cd, dm_device,
 					 root_hash_bytes,
 					 hash_size,
+					 signature, signature_size,
 					 activate_flags);
 out:
+	crypt_safe_free(signature);
 	crypt_free(cd);
 	free(root_hash_bytes);
 	free(CONST_CAST(char*)params.salt);
@@ -195,7 +213,8 @@ static int action_open(int arg)
 	return _activate(action_argv[1],
 			 action_argv[0],
 			 action_argv[2],
-			 action_argv[3], 0);
+			 action_argv[3],
+			 opt_root_hash_signature ? CRYPT_VERITY_ROOT_HASH_SIGNATURE : 0);
 }
 
 static int action_verify(int arg)
@@ -227,7 +246,8 @@ static int action_status(int arg)
 	struct crypt_params_verity vp = {};
 	struct crypt_device *cd = NULL;
 	struct stat st;
-	char *backing_file;
+	char *backing_file, *root_hash;
+	size_t root_hash_size;
 	unsigned i, path = 0;
 	int r = 0;
 
@@ -257,21 +277,23 @@ static int action_status(int arg)
 				ci == CRYPT_BUSY ? " and is in use" : "");
 
 		r = crypt_init_by_name_and_header(&cd, action_argv[0], NULL);
-		if (r < 0 || !crypt_get_type(cd))
+		if (r < 0)
 			goto out;
 
-		log_std("  type:        %s\n", crypt_get_type(cd));
+		log_std("  type:        %s\n", crypt_get_type(cd) ?: "n/a");
 
 		r = crypt_get_active_device(cd, action_argv[0], &cad);
 		if (r < 0)
 			goto out;
 
-		log_std("  status:      %s\n",
-			cad.flags & CRYPT_ACTIVATE_CORRUPTED ? "corrupted" : "verified");
-
+		/* Print only VERITY type devices */
 		r = crypt_get_verity_info(cd, &vp);
 		if (r < 0)
 			goto out;
+
+		log_std("  status:      %s%s\n",
+			cad.flags & CRYPT_ACTIVATE_CORRUPTED ? "corrupted" : "verified",
+			vp.flags & CRYPT_VERITY_ROOT_HASH_SIGNATURE ? " (with signature)" : "");
 
 		log_std("  hash type:   %u\n", vp.hash_type);
 		log_std("  data block:  %u\n", vp.data_block_size);
@@ -286,8 +308,7 @@ static int action_status(int arg)
 		log_std("\n");
 
 		log_std("  data device: %s\n", vp.data_device);
-		if (crypt_loop_device(vp.data_device)) {
-			backing_file = crypt_loop_backing_file(vp.data_device);
+		if ((backing_file = crypt_loop_backing_file(vp.data_device))) {
 			log_std("  data loop:   %s\n", backing_file);
 			free(backing_file);
 		}
@@ -296,8 +317,7 @@ static int action_status(int arg)
 					   "readonly" : "read/write");
 
 		log_std("  hash device: %s\n", vp.hash_device);
-		if (crypt_loop_device(vp.hash_device)) {
-			backing_file = crypt_loop_backing_file(vp.hash_device);
+		if ((backing_file = crypt_loop_backing_file(vp.hash_device))) {
 			log_std("  hash loop:   %s\n", backing_file);
 			free(backing_file);
 		}
@@ -306,8 +326,7 @@ static int action_status(int arg)
 
 		if (vp.fec_device) {
 			log_std("  FEC device:  %s\n", vp.fec_device);
-			if (crypt_loop_device(vp.fec_device)) {
-				backing_file = crypt_loop_backing_file(vp.fec_device);
+			if ((backing_file = crypt_loop_backing_file(vp.fec_device))) {
 				log_std("  FEC loop:    %s\n", backing_file);
 				free(backing_file);
 			}
@@ -315,6 +334,19 @@ static int action_status(int arg)
 				vp.fec_area_offset * vp.hash_block_size / 512);
 			log_std("  FEC roots:   %u\n", vp.fec_roots);
 		}
+
+		root_hash_size = crypt_get_volume_key_size(cd);
+		if (root_hash_size > 0 && (root_hash = malloc(root_hash_size))) {
+			r = crypt_volume_key_get(cd, CRYPT_ANY_SLOT, root_hash, &root_hash_size, NULL, 0);
+			if (!r) {
+				log_std("  root hash:   ");
+				for (i = 0; i < root_hash_size; i++)
+					log_std("%02hhx", (const char)root_hash[i]);
+				log_std("\n");
+			}
+			free(root_hash);
+		}
+
 		if (cad.flags & (CRYPT_ACTIVATE_IGNORE_CORRUPTION|
 				 CRYPT_ACTIVATE_RESTART_ON_CORRUPTION|
 				 CRYPT_ACTIVATE_IGNORE_ZERO_BLOCKS|
@@ -360,7 +392,7 @@ static struct action_type {
 	{ "format",	action_format, 2, N_("<data_device> <hash_device>"),N_("format device") },
 	{ "verify",	action_verify, 3, N_("<data_device> <hash_device> <root_hash>"),N_("verify device") },
 	{ "open",	action_open,   4, N_("<data_device> <name> <hash_device> <root_hash>"),N_("open device as <name>") },
-	{ "close",	action_close,  1, N_("<name>"),N_("close device (deactivate and remove mapping)") },
+	{ "close",	action_close,  1, N_("<name>"),N_("close device (remove mapping)") },
 	{ "status",	action_status, 1, N_("<name>"),N_("show active device status") },
 	{ "dump",	action_dump,   1, N_("<hash_device>"),N_("show on-disk information") },
 	{ NULL, NULL, 0, NULL, NULL }
@@ -394,6 +426,11 @@ static void help(poptContext popt_context,
 			DEFAULT_VERITY_HASH, DEFAULT_VERITY_DATA_BLOCK,
 			DEFAULT_VERITY_HASH_BLOCK, DEFAULT_VERITY_SALT_SIZE,
 			1);
+		poptFreeContext(popt_context);
+		exit(EXIT_SUCCESS);
+	} else if (key->shortName == 'V') {
+		log_std("%s %s\n", PACKAGE_VERITY, PACKAGE_VERSION);
+		poptFreeContext(popt_context);
 		exit(EXIT_SUCCESS);
 	} else
 		usage(popt_context, EXIT_SUCCESS, NULL, NULL);
@@ -419,11 +456,11 @@ int main(int argc, const char **argv)
 		{ NULL,    '\0', POPT_ARG_CALLBACK, help, 0, NULL,                         NULL },
 		{ "help",  '?',  POPT_ARG_NONE,     NULL, 0, N_("Show this help message"), NULL },
 		{ "usage", '\0', POPT_ARG_NONE,     NULL, 0, N_("Display brief usage"),    NULL },
+		{ "version",'V', POPT_ARG_NONE,     NULL, 0, N_("Print package version"),  NULL },
 		POPT_TABLEEND
 	};
 	static struct poptOption popt_options[] = {
 		{ NULL,              '\0', POPT_ARG_INCLUDE_TABLE, popt_help_options, 0, N_("Help options:"), NULL },
-		{ "version",         '\0', POPT_ARG_NONE, &opt_version_mode, 0, N_("Print package version"), NULL },
 		{ "verbose",         'v',  POPT_ARG_NONE, &opt_verbose,      0, N_("Shows more detailed error messages"), NULL },
 		{ "debug",           '\0', POPT_ARG_NONE, &opt_debug,        0, N_("Show debug messages"), NULL },
 		{ "no-superblock",   0,    POPT_ARG_VAL,  &use_superblock,   0, N_("Do not use verity superblock"), NULL },
@@ -438,6 +475,7 @@ int main(int argc, const char **argv)
 		{ "hash",            'h',  POPT_ARG_STRING, &hash_algorithm, 0, N_("Hash algorithm"), N_("string") },
 		{ "salt",            's',  POPT_ARG_STRING, &salt_string,    0, N_("Salt"), N_("hex string") },
 		{ "uuid",            '\0', POPT_ARG_STRING, &opt_uuid,       0, N_("UUID for device to use"), NULL },
+		{ "root-hash-signature",'\0', POPT_ARG_STRING, &opt_root_hash_signature,  0, N_("Path to root hash signature file"), NULL },
 		{ "restart-on-corruption", 0,POPT_ARG_NONE,&opt_restart_on_corruption, 0, N_("Restart kernel if corruption is detected"), NULL },
 		{ "ignore-corruption", 0,  POPT_ARG_NONE, &opt_ignore_corruption,  0, N_("Ignore corruption, log it only"), NULL },
 		{ "ignore-zero-blocks", 0, POPT_ARG_NONE, &opt_ignore_zero_blocks, 0, N_("Do not verify zeroed blocks"), NULL },
@@ -491,12 +529,6 @@ int main(int argc, const char **argv)
 		usage(popt_context, EXIT_FAILURE, poptStrerror(r),
 		      poptBadOption(popt_context, POPT_BADOPTION_NOALIAS));
 
-	if (opt_version_mode) {
-		log_std("%s %s\n", PACKAGE_VERITY, PACKAGE_VERSION);
-		poptFreeContext(popt_context);
-		exit(EXIT_SUCCESS);
-	}
-
 	if (!(aname = poptGetArg(popt_context)))
 		usage(popt_context, EXIT_FAILURE, _("Argument <action> missing."),
 		      poptGetInvocationName(popt_context));
@@ -547,12 +579,17 @@ int main(int argc, const char **argv)
 
 	if ((opt_ignore_corruption || opt_restart_on_corruption || opt_ignore_zero_blocks) && strcmp(aname, "open"))
 		usage(popt_context, EXIT_FAILURE,
-		_("Option --ignore-corruption, --restart-on-corruption or --ignore-zero-blocks is allowed only for open operation.\n"),
+		_("Option --ignore-corruption, --restart-on-corruption or --ignore-zero-blocks is allowed only for open operation."),
+		poptGetInvocationName(popt_context));
+
+	if (opt_root_hash_signature && strcmp(aname, "open"))
+		usage(popt_context, EXIT_FAILURE,
+		_("Option --root-hash-signature can be used only for open operation."),
 		poptGetInvocationName(popt_context));
 
 	if (opt_ignore_corruption && opt_restart_on_corruption)
 		usage(popt_context, EXIT_FAILURE,
-		_("Option --ignore-corruption and --restart-on-corruption cannot be used together.\n"),
+		_("Option --ignore-corruption and --restart-on-corruption cannot be used together."),
 		poptGetInvocationName(popt_context));
 
 	if (opt_debug) {

@@ -1,8 +1,8 @@
 /*
  * TCRYPT (TrueCrypt-compatible) and VeraCrypt volume handling
  *
- * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2019 Milan Broz
+ * Copyright (C) 2012-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2020 Milan Broz
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -23,7 +23,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
 #include <assert.h>
 
 #include "libcryptsetup.h"
@@ -301,8 +300,8 @@ static int decrypt_blowfish_le_cbc(struct tcrypt_alg *alg,
 	}
 
 	crypt_cipher_destroy(cipher);
-	crypt_memzero(iv, bs);
-	crypt_memzero(iv_old, bs);
+	crypt_safe_memzero(iv, bs);
+	crypt_safe_memzero(iv_old, bs);
 	return r;
 }
 
@@ -369,8 +368,8 @@ static int TCRYPT_decrypt_hdr_one(struct tcrypt_alg *alg, const char *mode,
 		crypt_cipher_destroy(cipher);
 	}
 
-	crypt_memzero(backend_key, sizeof(backend_key));
-	crypt_memzero(iv, TCRYPT_HDR_IV_LEN);
+	crypt_safe_memzero(backend_key, sizeof(backend_key));
+	crypt_safe_memzero(iv, TCRYPT_HDR_IV_LEN);
 	return r;
 }
 
@@ -420,8 +419,8 @@ out:
 		if (cipher[j])
 			crypt_cipher_destroy(cipher[j]);
 
-	crypt_memzero(iv, bs);
-	crypt_memzero(iv_old, bs);
+	crypt_safe_memzero(iv, bs);
+	crypt_safe_memzero(iv_old, bs);
 	return r;
 }
 
@@ -474,13 +473,13 @@ static int TCRYPT_decrypt_hdr(struct crypt_device *cd, struct tcrypt_phdr *hdr,
 		r = -EPERM;
 	}
 
-	crypt_memzero(&hdr2, sizeof(hdr2));
+	crypt_safe_memzero(&hdr2, sizeof(hdr2));
 	return r;
 }
 
 static int TCRYPT_pool_keyfile(struct crypt_device *cd,
-				unsigned char pool[TCRYPT_KEY_POOL_LEN],
-				const char *keyfile)
+				unsigned char pool[VCRYPT_KEY_POOL_LEN],
+				const char *keyfile, int keyfiles_pool_length)
 {
 	unsigned char *data;
 	int i, j, fd, data_size, r = -EIO;
@@ -512,12 +511,12 @@ static int TCRYPT_pool_keyfile(struct crypt_device *cd,
 		pool[j++] += (unsigned char)(crc >> 16);
 		pool[j++] += (unsigned char)(crc >>  8);
 		pool[j++] += (unsigned char)(crc);
-		j %= TCRYPT_KEY_POOL_LEN;
+		j %= keyfiles_pool_length;
 	}
 	r = 0;
 out:
-	crypt_memzero(&crc, sizeof(crc));
-	crypt_memzero(data, TCRYPT_KEYFILE_LEN);
+	crypt_safe_memzero(&crc, sizeof(crc));
+	crypt_safe_memzero(data, TCRYPT_KEYFILE_LEN);
 	free(data);
 
 	return r;
@@ -527,29 +526,39 @@ static int TCRYPT_init_hdr(struct crypt_device *cd,
 			   struct tcrypt_phdr *hdr,
 			   struct crypt_params_tcrypt *params)
 {
-	unsigned char pwd[TCRYPT_KEY_POOL_LEN] = {};
-	size_t passphrase_size;
+	unsigned char pwd[VCRYPT_KEY_POOL_LEN] = {};
+	size_t passphrase_size, max_passphrase_size;
 	char *key;
 	unsigned int i, skipped = 0, iterations;
-	int r = -EPERM;
+	int r = -EPERM, keyfiles_pool_length;
 
 	if (posix_memalign((void*)&key, crypt_getpagesize(), TCRYPT_HDR_KEY_LEN))
 		return -ENOMEM;
 
+	if (params->flags & CRYPT_TCRYPT_VERA_MODES &&
+	    params->passphrase_size > TCRYPT_KEY_POOL_LEN) {
+		/* Really. Keyfile pool length depends on passphrase size in Veracrypt. */
+		max_passphrase_size = VCRYPT_KEY_POOL_LEN;
+		keyfiles_pool_length = VCRYPT_KEY_POOL_LEN;
+	} else {
+		max_passphrase_size = TCRYPT_KEY_POOL_LEN;
+		keyfiles_pool_length = TCRYPT_KEY_POOL_LEN;
+	}
+
 	if (params->keyfiles_count)
-		passphrase_size = TCRYPT_KEY_POOL_LEN;
+		passphrase_size = max_passphrase_size;
 	else
 		passphrase_size = params->passphrase_size;
 
-	if (params->passphrase_size > TCRYPT_KEY_POOL_LEN) {
-		log_err(cd, _("Maximum TCRYPT passphrase length (%d) exceeded."),
-			      TCRYPT_KEY_POOL_LEN);
+	if (params->passphrase_size > max_passphrase_size) {
+		log_err(cd, _("Maximum TCRYPT passphrase length (%zu) exceeded."),
+			      max_passphrase_size);
 		goto out;
 	}
 
 	/* Calculate pool content from keyfiles */
 	for (i = 0; i < params->keyfiles_count; i++) {
-		r = TCRYPT_pool_keyfile(cd, pwd, params->keyfiles[i]);
+		r = TCRYPT_pool_keyfile(cd, pwd, params->keyfiles[i], keyfiles_pool_length);
 		if (r < 0)
 			goto out;
 	}
@@ -582,13 +591,11 @@ static int TCRYPT_init_hdr(struct crypt_device *cd,
 				hdr->salt, TCRYPT_HDR_SALT_LEN,
 				key, TCRYPT_HDR_KEY_LEN,
 				iterations, 0, 0);
-		if (r < 0 && crypt_hash_size(tcrypt_kdf[i].hash) < 0) {
+		if (r < 0) {
 			log_verbose(cd, _("PBKDF2 hash algorithm %s not available, skipping."),
 				      tcrypt_kdf[i].hash);
 			continue;
 		}
-		if (r < 0)
-			break;
 
 		/* Decrypt header */
 		r = TCRYPT_decrypt_hdr(cd, hdr, key, params->flags);
@@ -621,9 +628,9 @@ static int TCRYPT_init_hdr(struct crypt_device *cd,
 			params->cipher, params->mode, params->key_size);
 	}
 out:
-	crypt_memzero(pwd, TCRYPT_KEY_POOL_LEN);
+	crypt_safe_memzero(pwd, TCRYPT_KEY_POOL_LEN);
 	if (key)
-		crypt_memzero(key, TCRYPT_HDR_KEY_LEN);
+		crypt_safe_memzero(key, TCRYPT_HDR_KEY_LEN);
 	free(key);
 	return r;
 }
@@ -632,10 +639,10 @@ int TCRYPT_read_phdr(struct crypt_device *cd,
 		     struct tcrypt_phdr *hdr,
 		     struct crypt_params_tcrypt *params)
 {
-	struct device *base_device, *device = crypt_metadata_device(cd);
+	struct device *base_device = NULL, *device = crypt_metadata_device(cd);
 	ssize_t hdr_size = sizeof(struct tcrypt_phdr);
 	char *base_device_path;
-	int devfd = 0, r;
+	int devfd, r;
 
 	assert(sizeof(struct tcrypt_phdr) == 512);
 
@@ -655,11 +662,11 @@ int TCRYPT_read_phdr(struct crypt_device *cd,
 		if (r < 0)
 			return r;
 		devfd = device_open(cd, base_device, O_RDONLY);
-		device_free(cd, base_device);
 	} else
 		devfd = device_open(cd, device, O_RDONLY);
 
 	if (devfd < 0) {
+		device_free(cd, base_device);
 		log_err(cd, _("Cannot open device %s."), device_path(device));
 		return -EINVAL;
 	}
@@ -692,11 +699,11 @@ int TCRYPT_read_phdr(struct crypt_device *cd,
 			device_alignment(device), hdr, hdr_size,
 			TCRYPT_HDR_OFFSET_BCK) == hdr_size)
 			r = TCRYPT_init_hdr(cd, hdr, params);
-	} else if (read_blockwise(devfd, device_block_size(cd, device),
-			device_alignment(device), hdr, hdr_size) == hdr_size)
+	} else if (read_lseek_blockwise(devfd, device_block_size(cd, device),
+			device_alignment(device), hdr, hdr_size, 0) == hdr_size)
 		r = TCRYPT_init_hdr(cd, hdr, params);
 
-	close(devfd);
+	device_free(cd, base_device);
 	if (r < 0)
 		memset(hdr, 0, sizeof (*hdr));
 	return r;
@@ -749,7 +756,7 @@ int TCRYPT_activate(struct crypt_device *cd,
 	}
 
 	if (strstr(params->mode, "-tcrypt")) {
-		log_err(cd, _("Kernel doesn't support activation for this TCRYPT legacy mode."));
+		log_err(cd, _("Kernel does not support activation for this TCRYPT legacy mode."));
 		return -ENOTSUP;
 	}
 
@@ -861,7 +868,7 @@ int TCRYPT_activate(struct crypt_device *cd,
 
 	if (r < 0 &&
 	    (dm_flags(cd, DM_CRYPT, &dmc_flags) || ((dmc_flags & req_flags) != req_flags))) {
-		log_err(cd, _("Kernel doesn't support TCRYPT compatible mapping."));
+		log_err(cd, _("Kernel does not support TCRYPT compatible mapping."));
 		r = -ENOTSUP;
 	}
 
@@ -920,9 +927,10 @@ out:
 }
 
 static int TCRYPT_status_one(struct crypt_device *cd, const char *name,
-			      const char *base_uuid, int index,
-			      size_t *key_size, char *cipher,
-			      uint64_t *data_offset, struct device **device)
+			     const char *base_uuid, int index,
+			     size_t *key_size, char *cipher,
+			     struct tcrypt_phdr *tcrypt_hdr,
+			     struct device **device)
 {
 	struct crypt_dm_active_device dmd;
 	struct dm_target *tgt = &dmd.segment;
@@ -955,7 +963,7 @@ static int TCRYPT_status_one(struct crypt_device *cd, const char *name,
 		strcat(cipher, "-");
 		strncat(cipher, tgt->u.crypt.cipher, MAX_CIPHER_LEN);
 		*key_size += tgt->u.crypt.vk->keylength;
-		*data_offset = tgt->u.crypt.offset * SECTOR_SIZE;
+		tcrypt_hdr->d.mk_offset = tgt->u.crypt.offset * SECTOR_SIZE;
 		device_free(cd, *device);
 		MOVE_REF(*device, tgt->data_device);
 	} else
@@ -993,10 +1001,10 @@ int TCRYPT_init_by_name(struct crypt_device *cd, const char *name,
 
 	key_size = tgt->u.crypt.vk->keylength;
 	r = TCRYPT_status_one(cd, name, uuid, 1, &key_size,
-			      cipher, &tcrypt_hdr->d.mk_offset, device);
+			      cipher, tcrypt_hdr, device);
 	if (!r)
 		r = TCRYPT_status_one(cd, name, uuid, 2, &key_size,
-				      cipher, &tcrypt_hdr->d.mk_offset, device);
+				      cipher, tcrypt_hdr, device);
 
 	if (r < 0 && r != -ENODEV)
 		return r;

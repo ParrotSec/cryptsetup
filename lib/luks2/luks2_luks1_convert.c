@@ -1,9 +1,9 @@
 /*
  * LUKS - Linux Unified Key Setup v2, LUKS1 conversion code
  *
- * Copyright (C) 2015-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2015-2019 Ondrej Kozina
- * Copyright (C) 2015-2019 Milan Broz
+ * Copyright (C) 2015-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2015-2020 Ondrej Kozina
+ * Copyright (C) 2015-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -23,6 +23,14 @@
 #include "luks2_internal.h"
 #include "../luks1/luks.h"
 #include "../luks1/af.h"
+
+int LUKS2_check_cipher(struct crypt_device *cd,
+		      size_t keylength,
+		      const char *cipher,
+		      const char *cipher_mode)
+{
+	return LUKS_check_cipher(cd, keylength, cipher, cipher_mode);
+}
 
 static int json_luks1_keyslot(const struct luks_phdr *hdr_v1, int keyslot, struct json_object **keyslot_object)
 {
@@ -83,8 +91,8 @@ static int json_luks1_keyslot(const struct luks_phdr *hdr_v1, int keyslot, struc
 	}
 	area_size = offs_b - offs_a;
 	json_object_object_add(jobj_area, "key_size", json_object_new_int(hdr_v1->keyBytes));
-	json_object_object_add(jobj_area, "offset", json_object_new_uint64(offset));
-	json_object_object_add(jobj_area, "size", json_object_new_uint64(area_size));
+	json_object_object_add(jobj_area, "offset", crypt_jobj_new_uint64(offset));
+	json_object_object_add(jobj_area, "size", crypt_jobj_new_uint64(area_size));
 	json_object_object_add(keyslot_obj, "area", jobj_area);
 
 	*keyslot_object = keyslot_obj;
@@ -137,7 +145,7 @@ static int json_luks1_segment(const struct luks_phdr *hdr_v1, struct json_object
 	/* offset field */
 	number = (uint64_t)hdr_v1->payloadOffset * SECTOR_SIZE;
 
-	field = json_object_new_uint64(number);
+	field = crypt_jobj_new_uint64(number);
 	if (!field) {
 		json_object_put(segment_obj);
 		return -ENOMEM;
@@ -200,7 +208,7 @@ static int json_luks1_segments(const struct luks_phdr *hdr_v1, struct json_objec
 		json_object_put(segments_obj);
 		return r;
 	}
-	json_object_object_add_by_uint(segments_obj, CRYPT_DEFAULT_SEGMENT, field);
+	json_object_object_add_by_uint(segments_obj, 0, field);
 
 	*segments_object = segments_obj;
 	return 0;
@@ -393,8 +401,9 @@ static int json_luks1_object(struct luks_phdr *hdr_v1, struct json_object **luks
 	json_object_object_add(luks1_obj, "config", field);
 
 	json_size = LUKS2_HDR_16K_LEN - LUKS2_HDR_BIN_LEN;
-	json_object_object_add(field, "json_size", json_object_new_uint64(json_size));
-	json_object_object_add(field, "keyslots_size", json_object_new_uint64(keyslots_size));
+	json_object_object_add(field, "json_size", crypt_jobj_new_uint64(json_size));
+	keyslots_size -= (keyslots_size % 4096);
+	json_object_object_add(field, "keyslots_size", crypt_jobj_new_uint64(keyslots_size));
 
 	*luks1_object = luks1_obj;
 	return 0;
@@ -410,8 +419,8 @@ static void move_keyslot_offset(json_object *jobj, int offset_add)
 		UNUSED(key);
 		json_object_object_get_ex(val, "area", &jobj_area);
 		json_object_object_get_ex(jobj_area, "offset", &jobj2);
-		offset = json_object_get_uint64(jobj2) + offset_add;
-		json_object_object_add(jobj_area, "offset", json_object_new_uint64(offset));
+		offset = crypt_jobj_get_uint64(jobj2) + offset_add;
+		json_object_object_add(jobj_area, "offset", crypt_jobj_new_uint64(offset));
 	}
 }
 
@@ -419,9 +428,9 @@ static void move_keyslot_offset(json_object *jobj, int offset_add)
 static int move_keyslot_areas(struct crypt_device *cd, off_t offset_from,
 			      off_t offset_to, size_t buf_size)
 {
+	int devfd, r = -EIO;
 	struct device *device = crypt_metadata_device(cd);
 	void *buf = NULL;
-	int r = -EIO, devfd = -1;
 
 	log_dbg(cd, "Moving keyslot areas of size %zu from %jd to %jd.",
 		buf_size, (intmax_t)offset_from, (intmax_t)offset_to);
@@ -430,7 +439,7 @@ static int move_keyslot_areas(struct crypt_device *cd, off_t offset_from,
 		return -ENOMEM;
 
 	devfd = device_open(cd, device, O_RDWR);
-	if (devfd == -1) {
+	if (devfd < 0) {
 		free(buf);
 		return -EIO;
 	}
@@ -457,9 +466,8 @@ static int move_keyslot_areas(struct crypt_device *cd, off_t offset_from,
 
 	r = 0;
 out:
-	device_sync(cd, device, devfd);
-	close(devfd);
-	crypt_memzero(buf, buf_size);
+	device_sync(cd, device);
+	crypt_safe_memzero(buf, buf_size);
 	free(buf);
 
 	return r;
@@ -471,7 +479,7 @@ static int luks_header_in_use(struct crypt_device *cd)
 
 	r = lookup_dm_dev_by_uuid(cd, crypt_get_uuid(cd), crypt_get_type(cd));
 	if (r < 0)
-		log_err(cd, _("Can not check status of device with uuid: %s."), crypt_get_uuid(cd));
+		log_err(cd, _("Cannot check status of device with uuid: %s."), crypt_get_uuid(cd));
 
 	return r;
 }
@@ -479,16 +487,16 @@ static int luks_header_in_use(struct crypt_device *cd)
 /* Check if there is a luksmeta area (foreign metadata created by the luksmeta package) */
 static int luksmeta_header_present(struct crypt_device *cd, off_t luks1_size)
 {
+	int devfd, r = 0;
 	static const uint8_t LM_MAGIC[] = { 'L', 'U', 'K', 'S', 'M', 'E', 'T', 'A' };
 	struct device *device = crypt_metadata_device(cd);
 	void *buf = NULL;
-	int devfd, r = 0;
 
 	if (posix_memalign(&buf, crypt_getpagesize(), sizeof(LM_MAGIC)))
 		return -ENOMEM;
 
 	devfd = device_open(cd, device, O_RDONLY);
-	if (devfd == -1) {
+	if (devfd < 0) {
 		free(buf);
 		return -EIO;
 	}
@@ -501,7 +509,6 @@ static int luksmeta_header_present(struct crypt_device *cd, off_t luks1_size)
 			r = -EBUSY;
 	}
 
-	close(devfd);
 	free(buf);
 	return r;
 }
@@ -512,7 +519,7 @@ int LUKS2_luks1_to_luks2(struct crypt_device *cd, struct luks_phdr *hdr1, struct
 	int r;
 	json_object *jobj = NULL;
 	size_t buf_size, buf_offset, luks1_size, luks1_shift = 2 * LUKS2_HDR_16K_LEN - LUKS_ALIGN_KEYSLOTS;
-	uint64_t max_size = crypt_get_data_offset(cd) * SECTOR_SIZE;
+	uint64_t required_size, max_size = crypt_get_data_offset(cd) * SECTOR_SIZE;
 
 	/* for detached headers max size == device size */
 	if (!max_size && (r = device_size(crypt_metadata_device(cd), &max_size)))
@@ -533,10 +540,17 @@ int LUKS2_luks1_to_luks2(struct crypt_device *cd, struct luks_phdr *hdr1, struct
 
 	log_dbg(cd, "Max size: %" PRIu64 ", LUKS1 (full) header size %zu , required shift: %zu",
 		max_size, luks1_size, luks1_shift);
-	if ((max_size - luks1_size) < luks1_shift) {
+
+	required_size = luks1_size + luks1_shift;
+
+	if ((max_size < required_size) &&
+	    device_fallocate(crypt_metadata_device(cd), required_size)) {
 		log_err(cd, _("Unable to move keyslot area. Not enough space."));
 		return -EINVAL;
 	}
+
+	if (max_size < required_size)
+		max_size = required_size;
 
 	r = json_luks1_object(hdr1, &jobj, max_size - 2 * LUKS2_HDR_16K_LEN);
 	if (r < 0)
@@ -564,6 +578,12 @@ int LUKS2_luks1_to_luks2(struct crypt_device *cd, struct luks_phdr *hdr1, struct
 		goto out;
 	}
 
+	/* check future LUKS2 metadata before moving keyslots area */
+	if (LUKS2_hdr_validate(cd, hdr2->jobj, hdr2->hdr_size - LUKS2_HDR_BIN_LEN)) {
+		r = -EINVAL;
+		goto out;
+	}
+
 	if ((r = luks_header_in_use(cd))) {
 		if (r > 0)
 			r = -EBUSY;
@@ -573,6 +593,14 @@ int LUKS2_luks1_to_luks2(struct crypt_device *cd, struct luks_phdr *hdr1, struct
 	// move keyslots 4k -> 32k offset
 	buf_offset = 2 * LUKS2_HDR_16K_LEN;
 	buf_size   = luks1_size - LUKS_ALIGN_KEYSLOTS;
+
+	/* check future LUKS2 keyslots area is at least as large as LUKS1 keyslots area */
+	if (buf_size > LUKS2_keyslots_size(hdr2->jobj)) {
+		log_err(cd, _("Unable to move keyslot area. LUKS2 keyslots area too small."));
+		r = -EINVAL;
+		goto out;
+	}
+
 	if ((r = move_keyslot_areas(cd, 8 * SECTOR_SIZE, buf_offset, buf_size)) < 0) {
 		log_err(cd, _("Unable to move keyslot area."));
 		goto out;
@@ -665,6 +693,11 @@ int LUKS2_luks2_to_luks1(struct crypt_device *cd, struct luks2_hdr *hdr2, struct
 	if (!jobj_segment)
 		return -EINVAL;
 
+	if (json_segment_get_sector_size(jobj_segment) != SECTOR_SIZE) {
+		log_err(cd, _("Cannot convert to LUKS1 format - default segment encryption sector size is not 512 bytes."));
+		return -EINVAL;
+	}
+
 	json_object_object_get_ex(hdr2->jobj, "digests", &jobj1);
 	if (!json_object_object_get_ex(jobj_digest, "type", &jobj2) ||
 	    strcmp(json_object_get_string(jobj2), "pbkdf2") ||
@@ -731,7 +764,7 @@ int LUKS2_luks2_to_luks1(struct crypt_device *cd, struct luks2_hdr *hdr2, struct
 				return -EINVAL;
 			if (!json_object_object_get_ex(jobj_area, "offset", &jobj1))
 				return -EINVAL;
-			offset = json_object_get_uint64(jobj1);
+			offset = crypt_jobj_get_uint64(jobj1);
 		} else {
 			if (LUKS2_find_area_gap(cd, hdr2, key_size, &offset, &area_length))
 				return -EINVAL;
@@ -763,7 +796,7 @@ int LUKS2_luks2_to_luks1(struct crypt_device *cd, struct luks2_hdr *hdr2, struct
 
 		if (!json_object_object_get_ex(jobj_kdf, "iterations", &jobj1))
 			continue;
-		hdr1->keyblock[i].passwordIterations = json_object_get_uint32(jobj1);
+		hdr1->keyblock[i].passwordIterations = crypt_jobj_get_uint32(jobj1);
 
 		if (!json_object_object_get_ex(jobj_kdf, "salt", &jobj1))
 			continue;
@@ -804,7 +837,7 @@ int LUKS2_luks2_to_luks1(struct crypt_device *cd, struct luks2_hdr *hdr2, struct
 
 	if (!json_object_object_get_ex(jobj_digest, "iterations", &jobj1))
 		return -EINVAL;
-	hdr1->mkDigestIterations = json_object_get_uint32(jobj1);
+	hdr1->mkDigestIterations = crypt_jobj_get_uint32(jobj1);
 
 	if (!json_object_object_get_ex(jobj_digest, "digest", &jobj1))
 		return -EINVAL;
@@ -829,7 +862,7 @@ int LUKS2_luks2_to_luks1(struct crypt_device *cd, struct luks2_hdr *hdr2, struct
 
 	if (!json_object_object_get_ex(jobj_segment, "offset", &jobj1))
 		return -EINVAL;
-	offset = json_object_get_uint64(jobj1) / SECTOR_SIZE;
+	offset = crypt_jobj_get_uint64(jobj1) / SECTOR_SIZE;
 	if (offset > UINT32_MAX)
 		return -EINVAL;
 	/* FIXME: LUKS1 requires offset == 0 || offset >= luks1_hdr_size */

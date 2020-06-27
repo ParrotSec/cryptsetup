@@ -1,6 +1,7 @@
 #!/bin/bash
 
-CRYPTSETUP="../cryptsetup"
+[ -z "$CRYPTSETUP_PATH" ] && CRYPTSETUP_PATH=".."
+CRYPTSETUP=$CRYPTSETUP_PATH/cryptsetup
 MNT_DIR="./mnt_luks"
 DEV_NAME="dummy"
 DEV_NAME2="ymmud"
@@ -10,7 +11,7 @@ FAST_PBKDF_OPT="--pbkdf pbkdf2 --pbkdf-force-iterations 1000"
 SKIP_COUNT=0
 
 cleanup() {
-	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove $DEV_NAME
+	[ -b /dev/mapper/$DEV_NAME ] && dmsetup remove --retry $DEV_NAME
 	udevadm settle >/dev/null 2>&1
 	if [ -d "$MNT_DIR" ] ; then
 	    umount -f $MNT_DIR 2>/dev/null
@@ -21,11 +22,9 @@ cleanup() {
 
 fail()
 {
-	if [ -n "$1" ] ; then
-		echo "FAIL $1 at line $(caller)"
-	else
-		echo "FAIL at line $(caller)"
-	fi
+	[ -n "$1" ] && echo "FAIL $1"
+	echo "FAILED backtrace:"
+	while caller $frame; do ((frame++)); done
 	cleanup
 	exit 100
 }
@@ -50,7 +49,7 @@ function dm_crypt_features()
 	[ $VER_MAJ -gt 1 ] && {
 		DM_PERF_CPU=1
 		DM_SECTOR_SIZE=1
-		DM_KEYRING=1
+		test -d /proc/sys/kernel/keys && DM_KEYRING=1
 		return
 	}
 
@@ -60,7 +59,7 @@ function dm_crypt_features()
 		DM_SECTOR_SIZE=1
 	fi
 	if [ $VER_MIN -gt 18 -o \( $VER_MIN -eq 18 -a $VER_PTC -ge 1 \) ]; then
-		DM_KEYRING=1
+		 test -d /proc/sys/kernel/keys && DM_KEYRING=1
 	fi
 }
 
@@ -238,6 +237,15 @@ else
 		echo -n "[$S]"
 		echo -e "$PWD1" | $CRYPTSETUP open -q --type plain --hash sha256 $DEV $DEV_NAME --sector-size $S || fail
 		check_sector_size $S
+		$CRYPTSETUP close $DEV_NAME || fail
+	done
+
+	echo -e "$PWD1" | $CRYPTSETUP open --type plain --hash sha256 $DEV $DEV_NAME --iv-large-sectors >/dev/null 2>&1 && fail
+	for S in 1024 2048 4096; do
+		echo -n "[$S/IV]"
+		echo -e "$PWD1" | $CRYPTSETUP open -q --type plain --hash sha256 $DEV $DEV_NAME --sector-size $S --iv-large-sectors || fail
+		check_sector_size $S
+		dmsetup table $DEV_NAME | grep -q "iv_large_sectors" || fail
 		$CRYPTSETUP close $DEV_NAME || fail
 	done
 	echo

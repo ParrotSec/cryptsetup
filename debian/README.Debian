@@ -42,7 +42,7 @@ which will install the system and setup cryptsetup and initramfs-tools.
 
  For instructions about how to encrypt your root filesystem and integrate
 cryptsetup into initramfs on a running system, see
-`/usr/share/doc/cryptsetup/README.initramfs.gz`.
+`/usr/share/doc/cryptsetup-initramfs/README.initramfs.gz`.
 
 
 2. Encrypted swap partition(s)
@@ -154,7 +154,7 @@ passphrase, and prints the result to stdout. The syntax is:
     /lib/cryptsetup/askpass PROMPT
 
  Passdev will wait for a given device to appear, mount it read-only, read the
-key, and unmount the device. See `/usr/share/doc/cryptsetup/README.initramfs.gz`
+key, and unmount the device. See `/usr/share/doc/cryptsetup-initramfs/README.initramfs.gz`
 for more information about passdev.
 
 
@@ -298,16 +298,15 @@ debian-devel] for further information.
 
 GRUB has been able to unlock LUKS1 devices since early in Jessie's
 release cycle.  This feature removes the need for a separate cleartext
-/boot partition, hence enables "real" full disk encryption.  However
-cryptsetup >=2.1 uses LUKS version 2 by default, which GRUB 2.02
-currently doesn't support.  In other words, it is currently not possible
-to unlock new LUKS devices formatted with the default parameters from
-GRUB.
+`/boot` partition, hence enables "real" full disk encryption.  However
+cryptsetup >=2.1 uses LUKS version 2 by default, which GRUB 2.02 doesn't
+support.  In other words, as of Buster it is not possible to unlock from
+GRUB new LUKS devices formatted with the default parameters.
 
-Neither Jessie nor Stretch's installer supports that feature, and users
-already had to implement various work-around to enable it.  Existing
-work-arounds won't work anymore with LUKS2.  Integration between LUKS
-and GRUB is documented at
+Neither Jessie nor Stretch's installers natively support unlocking from
+GRUB, hence users already had to implement various workarounds to enable
+it.  **Former workarounds won't work anymore with LUKS2**.  Integration
+between LUKS and GRUB is documented at
 <https://cryptsetup-team.pages.debian.net/cryptsetup/encrypted-boot.html>,
 including recipes to enable the feature starting from the usual
 "encrypted LVM" partitioning method of the Debian Installer -- both with

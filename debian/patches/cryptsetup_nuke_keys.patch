@@ -9,10 +9,10 @@ cryptsetup-nuke-password" after having installed that package.
  1 file changed, 10 insertions(+)
 
 diff --git a/src/cryptsetup.c b/src/cryptsetup.c
-index 13aa656..b21f641 100644
+index 601a967..99a98ac 100644
 --- a/src/cryptsetup.c
 +++ b/src/cryptsetup.c
-@@ -1616,6 +1616,15 @@ out:
+@@ -1838,6 +1838,15 @@ out:
  	return r;
  }
  
@@ -28,7 +28,7 @@ index 13aa656..b21f641 100644
  static int action_luksChangeKey(void)
  {
  	const char *opt_new_key_file = (action_argc > 1 ? action_argv[1] : NULL);
-@@ -2374,6 +2383,7 @@ static struct action_type {
+@@ -3294,6 +3303,7 @@ static struct action_type {
  	{ "config",       action_luksConfig,   1, 1, N_("<device>"), N_("set permanent configuration options for LUKS2") },
  	{ "luksFormat",   action_luksFormat,   1, 1, N_("<device> [<new key file>]"), N_("formats a LUKS device") },
  	{ "luksAddKey",   action_luksAddKey,   1, 1, N_("<device> [<new key file>]"), N_("add key to LUKS device") },

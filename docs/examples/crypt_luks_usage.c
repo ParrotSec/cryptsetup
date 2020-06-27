@@ -1,7 +1,7 @@
 /*
- * An example of using LUKS device through libcryptsetup API
+ *  libcryptsetup API - using LUKS device example
  *
- * Copyright (C) 2011-2019 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2011-2020 Red Hat, Inc. All rights reserved.
  *
  * This file is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -29,23 +29,18 @@
 static int format_and_add_keyslots(const char *path)
 {
 	struct crypt_device *cd;
-	struct crypt_params_luks1 params;
 	int r;
 
 	/*
-	 * crypt_init() call precedes most of operations of cryptsetup API. The call is used
-	 * to initialize crypt device context stored in structure referenced by _cd_ in
-	 * the example. Second parameter is used to pass underlaying device path.
+	 * The crypt_init() call is used  to initialize crypt_device context,
+	 * The path parameter specifies a device path.
 	 *
-	 * Note:
-	 * If path refers to a regular file it'll be attached to a first free loop device.
-	 * crypt_init() operation fails in case there's no more loop device available.
-	 * Also, loop device will have the AUTOCLEAR flag set, so the file loopback will
-	 * be detached automatically.
+	 * For path, you can use either link to a file or block device.
+	 * The loopback device will be detached automatically.
 	 */
 
 	r = crypt_init(&cd, path);
-	if (r < 0 ) {
+	if (r < 0) {
 		printf("crypt_init() failed for %s.\n", path);
 		return r;
 	}
@@ -53,73 +48,37 @@ static int format_and_add_keyslots(const char *path)
 	printf("Context is attached to block device %s.\n", crypt_get_device_name(cd));
 
 	/*
-	 * So far no data were written on your device. This will change with call of
-	 * crypt_format() only if you specify CRYPT_LUKS1 as device type.
+	 * So far, no data were written to the device.
 	 */
-	printf("Device %s will be formatted to LUKS device after 5 seconds.\n"
+	printf("Device %s will be formatted as a LUKS device after 5 seconds.\n"
 	       "Press CTRL+C now if you want to cancel this operation.\n", path);
 	sleep(5);
 
-
-	/*
-	 * Prepare LUKS format parameters
-	 *
-	 * hash parameter defines PBKDF2 hash algorithm used in LUKS header.
-	 * For compatibility reason we use SHA1 here.
-	 */
-	params.hash = "sha1";
-
-	/*
-	 * data_alignment parameter is relevant only in case of the luks header
-	 * and the payload are both stored on same device.
-	 *
-	 * if you set data_alignment = 0, cryptsetup will autodetect
-	 * data_alignment according to underlaying device topology.
-	 */
-	params.data_alignment = 0;
-
-	/*
-	 * data_device parameter defines that no external device
-	 * for luks header will be used
-	 */
-	params.data_device = NULL;
-
 	/*
 	 * NULLs for uuid and volume_key means that these attributes will be
-	 * generated during crypt_format(). Volume key is generated with respect
-	 * to key size parameter passed to function.
-	 *
-	 * crypt_format() checks device size (LUKS header must fit there).
+	 * generated during crypt_format().
 	 */
 	r = crypt_format(cd,		/* crypt context */
-			 CRYPT_LUKS1,	/* LUKS1 is standard LUKS header */
+			 CRYPT_LUKS2,	/* LUKS2 is a new LUKS format; use CRYPT_LUKS1 for LUKS1 */
 			 "aes",		/* used cipher */
-			 "xts-plain64",	/* used block mode and IV generator*/
+			 "xts-plain64",	/* used block mode and IV */
 			 NULL,		/* generate UUID */
 			 NULL,		/* generate volume key from RNG */
-			 256 / 8,	/* 256bit key - here AES-128 in XTS mode, size is in bytes */
-			 &params);	/* parameters above */
+			 512 / 8,	/* 512bit key - here AES-256 in XTS mode, size is in bytes */
+			 NULL);		/* default parameters */
 
-	if(r < 0) {
+	if (r < 0) {
 		printf("crypt_format() failed on device %s\n", crypt_get_device_name(cd));
 		crypt_free(cd);
 		return r;
 	}
 
 	/*
-	 * The device now contains LUKS1 header, but there is
-	 * no active keyslot with encrypted volume key yet.
-	 */
-
-	/*
-	 * cryptt_kesylot_add_* call stores volume_key in encrypted form into keyslot.
-	 * Without keyslot you can't manipulate with LUKS device after the context will be freed.
+	 * The device now contains a LUKS header, but there is no active keyslot.
 	 *
-	 * To create a new keyslot you need to supply the existing one (to get the volume key from) or
-	 * you need to supply the volume key.
+	 * crypt_keyslot_add_* call stores the volume_key in the encrypted form into the keyslot.
 	 *
-	 * After format, we have volume key stored internally in context so add new keyslot
-	 * using this internal volume key.
+	 * After format, the volume key is stored internally.
 	 */
 	r = crypt_keyslot_add_by_volume_key(cd,			/* crypt context */
 					    CRYPT_ANY_SLOT,	/* just use first free slot */
@@ -137,8 +96,8 @@ static int format_and_add_keyslots(const char *path)
 	printf("The first keyslot is initialized.\n");
 
 	/*
-	 * Add another keyslot, now using the first keyslot.
-	 * It will decrypt volume key from the first keyslot and creates new one with another passphrase.
+	 * Add another keyslot, now authenticating with the first keyslot.
+	 * It decrypts the volume key from the first keyslot and creates a new one with the specified passphrase.
 	 */
 	r = crypt_keyslot_add_by_passphrase(cd,			/* crypt context */
 					    CRYPT_ANY_SLOT,	/* just use first free slot */
@@ -164,21 +123,18 @@ static int activate_and_check_status(const char *path, const char *device_name)
 
 	/*
 	 * LUKS device activation example.
-	 * It's sequence of sub-steps: device initialization, LUKS header load
-	 * and the device activation itself.
 	 */
 	r = crypt_init(&cd, path);
-	if (r < 0 ) {
+	if (r < 0) {
 		printf("crypt_init() failed for %s.\n", path);
 		return r;
 	}
 
 	/*
-	 * crypt_load() is used to load the LUKS header from block device
-	 * into crypt_device context.
+	 * crypt_load() is used to load existing LUKS header from a block device
 	 */
 	r = crypt_load(cd,		/* crypt context */
-		       CRYPT_LUKS1,	/* requested type */
+		       CRYPT_LUKS,	/* requested type - here LUKS of any type */
 		       NULL);		/* additional parameters (not used) */
 
 	if (r < 0) {
@@ -188,11 +144,11 @@ static int activate_and_check_status(const char *path, const char *device_name)
 	}
 
 	/*
-	 * Device activation creates device-mapper devie mapping with name device_name.
+	 * Device activation creates a device-mapper device with the specified name.
 	 */
 	r = crypt_activate_by_passphrase(cd,		/* crypt context */
 					 device_name,	/* device name to activate */
-					 CRYPT_ANY_SLOT,/* which slot use (ANY - try all) */
+					 CRYPT_ANY_SLOT,/* the keyslot use (try all here) */
 					 "foo", 3,	/* passphrase */
 					 CRYPT_ACTIVATE_READONLY); /* flags */
 	if (r < 0) {
@@ -201,13 +157,13 @@ static int activate_and_check_status(const char *path, const char *device_name)
 		return r;
 	}
 
-	printf("LUKS device %s/%s is active.\n", crypt_get_dir(), device_name);
+	printf("%s device %s/%s is active.\n", crypt_get_type(cd), crypt_get_dir(), device_name);
 	printf("\tcipher used: %s\n", crypt_get_cipher(cd));
 	printf("\tcipher mode: %s\n", crypt_get_cipher_mode(cd));
 	printf("\tdevice UUID: %s\n", crypt_get_uuid(cd));
 
 	/*
-	 * Get info about active device (query DM backend)
+	 * Get info about the active device.
 	 */
 	r = crypt_get_active_device(cd, device_name, &cad);
 	if (r < 0) {
@@ -235,7 +191,7 @@ static int handle_active_device(const char *device_name)
 	int r;
 
 	/*
-	 * crypt_init_by_name() initializes device context and loads LUKS header from backing device
+	 * crypt_init_by_name() initializes context by an active device-mapper name
 	 */
 	r = crypt_init_by_name(&cd, device_name);
 	if (r < 0) {
@@ -252,7 +208,7 @@ static int handle_active_device(const char *device_name)
 	}
 
 	/*
-	 * crypt_deactivate() is used to deactivate device
+	 * crypt_deactivate() is used to deactivate a device
 	 */
 	r = crypt_deactivate(cd, device_name);
 	if (r < 0) {

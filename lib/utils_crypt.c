@@ -2,8 +2,8 @@
  * utils_crypt - cipher utilities for cryptsetup
  *
  * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2019 Milan Broz
+ * Copyright (C) 2009-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -147,79 +147,6 @@ int crypt_parse_pbkdf(const char *s, const char **pbkdf)
 		*pbkdf = tmp;
 
 	return 0;
-}
-
-/*
- * Replacement for memset(s, 0, n) on stack that can be optimized out
- * Also used in safe allocations for explicit memory wipe.
- */
-void crypt_memzero(void *s, size_t n)
-{
-#ifdef HAVE_EXPLICIT_BZERO
-	explicit_bzero(s, n);
-#else
-	volatile uint8_t *p = (volatile uint8_t *)s;
-
-	while(n--)
-		*p++ = 0;
-#endif
-}
-
-/* safe allocations */
-void *crypt_safe_alloc(size_t size)
-{
-	struct safe_allocation *alloc;
-
-	if (!size || size > (SIZE_MAX - offsetof(struct safe_allocation, data)))
-		return NULL;
-
-	alloc = malloc(size + offsetof(struct safe_allocation, data));
-	if (!alloc)
-		return NULL;
-
-	alloc->size = size;
-	crypt_memzero(&alloc->data, size);
-
-	/* coverity[leaked_storage] */
-	return &alloc->data;
-}
-
-void crypt_safe_free(void *data)
-{
-	struct safe_allocation *alloc;
-
-	if (!data)
-		return;
-
-	alloc = (struct safe_allocation *)
-		((char *)data - offsetof(struct safe_allocation, data));
-
-	crypt_memzero(data, alloc->size);
-
-	alloc->size = 0x55aa55aa;
-	free(alloc);
-}
-
-void *crypt_safe_realloc(void *data, size_t size)
-{
-	struct safe_allocation *alloc;
-	void *new_data;
-
-	new_data = crypt_safe_alloc(size);
-
-	if (new_data && data) {
-
-		alloc = (struct safe_allocation *)
-			((char *)data - offsetof(struct safe_allocation, data));
-
-		if (size > alloc->size)
-			size = alloc->size;
-
-		memcpy(new_data, data, size);
-	}
-
-	crypt_safe_free(data);
-	return new_data;
 }
 
 ssize_t crypt_hex_to_bytes(const char *hex, char **result, int safe_alloc)

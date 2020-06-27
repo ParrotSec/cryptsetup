@@ -36,6 +36,7 @@ cryptsetup_message() {
 #   For error and warning messages, CRYPTTAB_NAME, (resp. CRYPTTAB_KEY)
 #   should be set to the (unmangled) mapped device name (resp. key
 #   file).
+#   Moreover CRYPTTAB_TYPE is set the device type.
 #   Return 1 on parsing error, 0 otherwise (incl. if unknown options
 #   were encountered).
 crypttab_parse_options() {
@@ -104,12 +105,18 @@ crypttab_parse_options() {
     done
     IFS=" "
 
-    if [ "$quiet" = "n" ] &&
-            [ -z "${CRYPTTAB_OPTION_luks+x}" ] && [ -n "${CRYPTTAB_OPTION_header+x}" ]; then
-        cryptsetup_message "WARNING: Option 'luks' missing in crypttab for target $CRYPTTAB_NAME." \
-                           "Headers are only supported for LUKS devices."
+    if ! _get_crypt_type; then # set CRYPTTAB_TYPE to the type of crypt device
+        CRYPTTAB_TYPE="plain"
+        if [ "$quiet" = "n" ]; then
+            cryptsetup_message "WARNING: $CRYPTTAB_NAME: couldn't determine device type," \
+                               "assuming default ($CRYPTTAB_TYPE)."
+        fi
     fi
-    if [ -z "${CRYPTTAB_OPTION_luks+x}" ] && [ -z "${CRYPTTAB_OPTION_tcrypt+x}" ]; then
+
+    if [ "$quiet" = "n" ] && [ -n "${CRYPTTAB_OPTION_header+x}" ] && [ "$CRYPTTAB_TYPE" != "luks" ]; then
+        cryptsetup_message "WARNING: $CRYPTTAB_NAME: Headers are only supported for LUKS devices."
+    fi
+    if [ "$CRYPTTAB_TYPE" = "plain" ]; then
         # the compiled-in default for these are subject to change
         options='cipher size'
         if [ -n "${CRYPTTAB_OPTION_keyscript+x}" ] || [ "$CRYPTTAB_KEY" = "none" ]; then
@@ -118,7 +125,7 @@ crypttab_parse_options() {
         for o in $options; do
             if [ "$quiet" = "n" ] && eval [ -z "\${CRYPTTAB_OPTION_$o+x}" ]; then
                 cryptsetup_message "WARNING: Option '$o' missing in crypttab for plain dm-crypt" \
-                    "mapping $CRYPTTAB_NAME. Please read /usr/share/doc/cryptsetup/README.initramfs and" \
+                    "mapping $CRYPTTAB_NAME. Please read /usr/share/doc/cryptsetup-initramfs/README.initramfs.gz and" \
                     "add the correct '$o' option to your crypttab(5)."
             fi
         done
@@ -240,7 +247,7 @@ crypttab_resolve_source() {
     [ ! -f "$CRYPTTAB_SOURCE" ] || return 0
     # otherwise resolve the block device specification
     local dev="$CRYPTTAB_SOURCE"
-    dev="$(resolve_device_spec "$dev")" && CRYPTTAB_SOURCE="$dev" || return 1
+    dev="$(_resolve_device_spec "$dev")" && CRYPTTAB_SOURCE="$dev" || return 1
 }
 
 # run_keyscript($keyscriptarg, $tried_count)
@@ -272,21 +279,34 @@ run_keyscript() {
     exec "$keyscript" "$keyscriptarg"
 }
 
-# get_crypt_type()
+# _get_crypt_type()
 #    Set CRYPTTAB_TYPE to the mapping type, depending on its
 #    $CRYPTTAB_OPTION_<option> values
-get_crypt_type() {
-    if [ "${CRYPTTAB_OPTION_tcrypt-}" = "yes" ]; then
-        CRYPTTAB_TYPE="tcrypt"
+#    Return a non-zero status if the mapping couldn't be determined
+_get_crypt_type() {
+    local s="$CRYPTTAB_SOURCE" t="" blk_t
+
+    if [ "${CRYPTTAB_OPTION_luks-}" = "yes" ]; then
+        t="luks"
+    elif [ "${CRYPTTAB_OPTION_tcrypt-}" = "yes" ]; then
+        t="tcrypt"
     elif [ "${CRYPTTAB_OPTION_plain-}" = "yes" ]; then
-        CRYPTTAB_TYPE="plain"
-    elif [ "${CRYPTTAB_OPTION_luks-}" = "yes" ] ||
-            /sbin/cryptsetup isLuks -- "${CRYPTTAB_OPTION_header-$CRYPTTAB_SOURCE}"; then
-        CRYPTTAB_TYPE="luks"
-    else
-        # assume plain dm-crypt device by default
-        CRYPTTAB_TYPE="plain"
+        t="plain"
+    elif [ -n "${CRYPTTAB_OPTION_header+x}" ]; then
+        # detached headers are only supported for LUKS devices
+        if [ -e "$CRYPTTAB_OPTION_header" ] && /sbin/cryptsetup isLuks -- "$CRYPTTAB_OPTION_header"; then
+            t="luks"
+        fi
+    elif [ -f "$s" ] || s="$(_resolve_device_spec "$CRYPTTAB_SOURCE")"; then
+        if /sbin/cryptsetup isLuks -- "$s"; then
+            t="luks"
+        elif blk_t="$(blkid -s TYPE -o value -- "$s")" && [ "$blk_t" = "BitLocker" ]; then
+            t="bitlk"
+        fi
     fi
+
+    [ -n "$t" ] || return 1
+    CRYPTTAB_TYPE="$t"
 }
 
 # unlock_mapping([$keyfile])
@@ -340,6 +360,51 @@ unlock_mapping() {
         open -- "$CRYPTTAB_SOURCE" "$CRYPTTAB_NAME"
 }
 
+# resume_mapping([$keyfile])
+#   Run cryptsetup(8) with suitable options and arguments to resume
+#   $CRYPTTAB_NAME.
+resume_mapping() {
+    local keyfile="${1:--}"
+
+    if [ "$CRYPTTAB_TYPE" != "luks" ]; then
+        cryptsetup_message "ERROR: $CRYPTTAB_NAME: unable to resume non-luks device"
+        return 1
+    fi
+
+    /sbin/cryptsetup -T1 \
+        ${CRYPTTAB_OPTION_header:+--header="$CRYPTTAB_OPTION_header"} \
+        ${CRYPTTAB_OPTION_keyslot:+--key-slot="$CRYPTTAB_OPTION_keyslot"} \
+        ${CRYPTTAB_OPTION_keyfile_size:+--keyfile-size="$CRYPTTAB_OPTION_keyfile_size"} \
+        ${CRYPTTAB_OPTION_keyfile_offset:+--keyfile-offset="$CRYPTTAB_OPTION_keyfile_offset"} \
+        --type="$CRYPTTAB_TYPE" --key-file="$keyfile" \
+        luksResume "$CRYPTTAB_NAME"
+}
+
+# resume_device($device)
+#   Resume $device with endless retries. Used by cryptsetup-suspend-wrapper.
+resume_device() {
+    local device="$1"
+    # check if device is really suspended
+    if dmsetup info -c --noheadings -o suspended -- "$device" 2>/dev/null | grep -Fxq "Active"; then
+        cryptsetup_message "ERROR: $CRYPTTAB_NAME: device was not suspendend"
+        sleep 5
+        return 1
+    fi
+
+    crypttab_find_entry "$device"
+    crypttab_parse_options --quiet
+    _get_crypt_type
+
+    # Loop endlessly until the resume command succeeded
+    while true; do
+        if [ "$CRYPTTAB_KEY" != "none" ]; then
+            resume_mapping "$CRYPTTAB_KEY" && break || true
+        else
+            run_keyscript "$CRYPTTAB_KEY" 1 | resume_mapping && break || true
+        fi
+    done
+}
+
 # crypttab_key_check()
 #   Sanity checks for keyfile $CRYPTTAB_KEY.  CRYPTTAB_NAME and
 #   CRYPTTAB_OPTION_<option> must be set appropriately.
@@ -361,16 +426,16 @@ crypttab_key_check() {
     local mode="$(stat -L -c"%04a" -- "$CRYPTTAB_KEY")"
     if [ $(stat -L -c"%u" -- "$CRYPTTAB_KEY") -ne 0 ] || [ "${mode%00}" = "$mode" ]; then
         cryptsetup_message "WARNING: $CRYPTTAB_NAME: key file $CRYPTTAB_KEY has" \
-            "insecure ownership, see /usr/share/doc/cryptsetup/README.Debian."
+            "insecure ownership, see /usr/share/doc/cryptsetup/README.Debian.gz."
     fi
 }
 
-# resolve_device_spec($spec)
+# _resolve_device_spec($spec)
 #   Resolve LABEL=<label>, UUID=<uuid>, PARTUUID=<partuuid> and
 #   PARTLABEL=<partlabel> to a block special device.  If $spec is
 #   already a (link to a block special device) then it is echoed as is.
 #   Return 1 if $spec doesn't correspond to a block special device.
-resolve_device_spec() {
+_resolve_device_spec() {
     local spec="$1"
     case "$spec" in
         UUID=*|LABEL=*|PARTUUID=*|PARTLABEL=*)
@@ -393,6 +458,13 @@ dm_blkdevname() {
     else
         return 1
     fi
+}
+
+# dm_active_crypt_devices()
+#   Print list of active dm-crypt devices.
+dm_active_crypt_devices() {
+    # XXX: that's not robust wrt udev mangling of special characters such as blank or colons
+    dmsetup table --target crypt | sed -n 's/:.*//p'
 }
 
 # crypttab_find_entry([--quiet], $target)
@@ -419,7 +491,7 @@ crypttab_find_entry() {
 
             # unmangle names
             CRYPTTAB_NAME="$(printf '%b' "$_CRYPTTAB_NAME")"
-            if [ -z "$_CRYPTTAB_SOURCE" ] || [ -z "$_CRYPTTAB_KEY" ] || [ -z "$_CRYPTTAB_OPTIONS" ]; then
+            if [ -z "$_CRYPTTAB_SOURCE" ] || [ -z "$_CRYPTTAB_KEY" ]; then
                 cryptsetup_message "WARNING: '$CRYPTTAB_NAME' is missing some arguments, see crypttab(5)"
                 continue
             elif [ "$CRYPTTAB_NAME" = "$target" ]; then
@@ -442,7 +514,7 @@ crypttab_find_entry() {
 #   entry found. Variables CRYPTTAB_NAME, CRYPTTAB_SOURCE, CRYPTTAB_KEY
 #   and CRYPTTAB_OPTIONS are set accordingly and available to the
 #   $callback.  (In addition _CRYPTTAB_NAME, _CRYPTTAB_SOURCE,
-#   _CRYPTTAB_KEY and _CRYPTTAB_OPTIONS are set to the unmangled values
+#   _CRYPTTAB_KEY and _CRYPTTAB_OPTIONS are set to the original values
 #   before decoding the escape sequence.)
 #   Return 0 if a match is found, and 1 otherwise.
 crypttab_foreach_entry() {
@@ -458,18 +530,128 @@ crypttab_foreach_entry() {
         fi
 
         # unmangle names
-        CRYPTTAB_NAME="$(   printf '%b' "$_CRYPTTAB_NAME"   )"
-        CRYPTTAB_SOURCE="$( printf '%b' "$_CRYPTTAB_SOURCE" )"
-        CRYPTTAB_KEY="$(    printf '%b' "$_CRYPTTAB_KEY"    )"
-        CRYPTTAB_OPTIONS="$(printf '%b' "$_CRYPTTAB_OPTIONS")"
+        CRYPTTAB_NAME="$(printf '%b' "$_CRYPTTAB_NAME")"
 
-        if [ -z "$CRYPTTAB_SOURCE" ] || [ -z "$CRYPTTAB_KEY" ] || [ -z "$CRYPTTAB_OPTIONS" ]; then
+        if [ -z "$_CRYPTTAB_SOURCE" ] || [ -z "$_CRYPTTAB_KEY" ]; then
             cryptsetup_message "WARNING: '$CRYPTTAB_NAME' is missing some arguments, see crypttab(5)"
             continue
         fi
 
+        CRYPTTAB_SOURCE="$( printf '%b' "$_CRYPTTAB_SOURCE" )"
+        CRYPTTAB_KEY="$(    printf '%b' "$_CRYPTTAB_KEY"    )"
+        CRYPTTAB_OPTIONS="$(printf '%b' "$_CRYPTTAB_OPTIONS")"
+
         "$callback" 9<&-
     done 9<"$TABFILE"
+}
+
+# _device_uuid($device)
+#   Print the UUID attribute of given block special $device.  Return 0
+#   on success, 1 on error.
+_device_uuid() {
+    local device="$1" uuid
+    if uuid="$(blkid -s UUID -o value -- "$device")" && [ -n "$uuid" ]; then
+        printf '%s\n' "$uuid"
+    else
+        return 1
+    fi
+}
+
+# _resolve_device({$device | $spec})
+#   Take a path to (or spec for) a block special device, and set DEV to
+#   the (symlink to block) device, and MAJ (resp. MIN) to its major-ID
+#   (resp. minor ID) decimal value.  On error these variables are not
+#   changed and 1 is returned.
+_resolve_device() {
+    local spec="$1" dev devno maj min
+    if dev="$(_resolve_device_spec "$spec")" &&
+            devno="$(stat -L -c"%t:%T" -- "$dev" 2>/dev/null)" &&
+            maj="${devno%:*}" && min="${devno#*:}" &&
+            [ "$devno" = "$maj:$min" ] && [ -n "$maj" ] && [ -n "$min" ] &&
+            maj=$(( 0x$maj )) && min=$(( 0x$min )) && [ $maj -gt 0 ]; then
+        DEV="$dev"
+        MAJ="$maj"
+        MIN="$min"
+        return 0
+    else
+        cryptsetup_message "ERROR: Couldn't resolve device $spec"
+    fi
+    return 1
+}
+
+# get_mnt_devno($mountpoint)
+#   Print the major:minor device ID(s) holding the file system currently
+#   mounted currenty mounted on $mountpoint.
+#   Return 0 on success, 1 on error (if $mountpoint is not a mountpoint).
+get_mnt_devno() {
+    local wantmount="$1" devnos="" uuid dev IFS
+    local spec mountpoint fstype _ DEV MAJ MIN
+
+    while IFS=" 	" read -r spec mountpoint fstype _; do
+        # treat lines starting with '#' as comments; /proc/mounts
+        # doesn't seem to contain these but per procfs(5) the format of
+        # that file is analogous to fstab(5)'s
+        if [ "${spec#\#}" = "$spec" ] && [ -n "$spec" ] &&
+                [ "$(printf '%b' "$mountpoint")" = "$wantmount" ]; then
+            # take the last mountpoint if used several times (shadowed)
+            unset -v devnos
+            spec="$(printf '%b' "$spec")"
+            _resolve_device "$spec" || continue # _resolve_device() already warns on error
+            fstype="$(printf '%b' "$fstype")"
+            if [ "$fstype" = "btrfs" ]; then
+                # btrfs can span over multiple devices
+                if uuid="$(_device_uuid "$DEV")"; then
+                    for dev in "/sys/fs/$fstype/$uuid/devices"/*/dev; do
+                        devnos="${devnos:+$devnos }$(cat "$dev")"
+                    done
+                else
+                    cryptsetup_message "ERROR: $spec: Couldn't determine UUID"
+                fi
+            elif [ -n "$fstype" ]; then
+                devnos="$MAJ:$MIN"
+            fi
+        fi
+    done </proc/mounts
+
+    if [ -z "${devnos:+x}" ]; then
+        return 1 # not found
+    else
+        printf '%s' "$devnos"
+    fi
+}
+
+# foreach_cryptdev($callback, $maj:$min, [$maj:$min ..])
+#   Run $callback on the (unmangled) name of each dm-crypt device
+#   recursively holding $maj:$min (typically corresponding to an md,
+#   linear, or dm-crypt device).  Slaves that aren't dm-crypt devices
+#   are ignored.
+foreach_cryptdev() {
+    local callback="$1" devno base
+    shift
+    for devno in "$@"; do
+        base="/sys/dev/block/$devno"
+        if [ ! -d "$base" ]; then
+            cryptsetup_message "ERROR: Couldn't find sysfs directory for $devno"
+            return 1
+        fi
+        _foreach_cryptdev "$callback" "$base"
+    done
+}
+_foreach_cryptdev() {
+    local callback="$1" d="$2" devno maj min name slave
+    [ -d "$d/slaves" ] || return 0
+    if [ -d "$d/dm" ] && devno="$(cat "$d/dev")" &&
+            maj="${devno%:*}" && min="${devno#*:}" &&
+            [ "$devno" = "$maj:$min" ] && [ -n "$maj" ] && [ -n "$min" ] &&
+            [ "$(dmsetup info -c --noheadings -o subsystem -j "$maj" -m "$min")" = "CRYPT" ] &&
+            name="$(dmsetup info -c --noheadings -o unmangled_name -j "$maj" -m "$min")"; then
+        "$callback" "$name"
+    fi
+    for slave in "$d/slaves"/*; do
+        if [ -d "$slave" ] && slave="$(realpath -e -- "$slave")"; then
+            _foreach_cryptdev "$callback" "$slave"
+        fi
+    done
 }
 
 # vim: set filetype=sh :

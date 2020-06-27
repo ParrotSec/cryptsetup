@@ -1,3 +1,209 @@
+cryptsetup (2:2.3.3-1parrot1) rolling-testing; urgency=medium
+
+  * Import new Debian release.
+
+ -- Lorenzo "Palinuro" Faletra <palinuro@parrotsec.org>  Sat, 27 Jun 2020 13:03:26 +0200
+
+cryptsetup (2:2.3.3-1) unstable; urgency=medium
+
+  [ Guilhem Moulin ]
+  * New upstream bugfix release.
+  * d/scripts/decrypt_derived: Remove useless call to `| tr -d '\n'`.
+  * d/control: Bump debhelper compatibility level to 13.  Remove
+    debian/tmp/lib/$DEB_HOST_MULTIARCH/libcryptsetup.la as we don't install it
+    anywhere.
+
+  [ Rob Pilling ]
+  * d/scripts/decrypt_derived:
+    + move an error message to standard error so it's not accidentally used as
+      a key
+    + exit with a success code when successful
+
+ -- Guilhem Moulin <guilhem@debian.org>  Thu, 04 Jun 2020 01:41:44 +0200
+
+cryptsetup (2:2.3.2-1) unstable; urgency=medium
+
+  * New upstream release.
+  * debian/control: Set 'Rules-Requires-Root: no'.
+  * d/initramfs/hooks/cryptroot: Unconditionally copy 'ecb' kernel module
+    when the host CPU lacks AES-NI support.  On such systems XTS needs ECB.
+    This is a work around for #883595 on kernels 4.10 and later.
+    (Closes: #959423)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Wed, 06 May 2020 16:22:01 +0200
+
+cryptsetup (2:2.3.1-1) unstable; urgency=medium
+
+  * New upstream release.
+  * d/initramfs/hooks/cryptroot: Don't set unused variable LIBC_DIR.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Tue, 24 Mar 2020 02:07:07 +0100
+
+cryptsetup (2:2.3.0-1) unstable; urgency=low
+
+  * New upstream release, introducing support for BitLocker-compatible
+    devices (BITLK format) used in Windows systems.
+    WARNING: crypttab(5) support for these devices is currently *experimental*
+    and requires blkid from util-linux >=2.33 (i.e., Buster or later).  These
+    devices currently have no keyword to use in the 4th field (unlike 'luks'
+    or 'plain'), the device type is inferred from the signature instead.
+  * crypttab(5): Make the 4th field (options) optional so we don't have to
+    introduce a new keyword for each new device type.  (That field is also
+    optional in the systemd implementation.)  Other fields (dm target name,
+    source device, and key file) remain required.
+  * Install cryptdisks_{start,stop} bash completion scripts to the right
+    path/name so they are loaded automatically. This was no longer the case
+    since 2:1.7.0-1.  (Closes: #949623)
+  * d/*.install: Replace tabs with spaces.
+  * d/cryptdisks-functions: Fix broken $FORCE_START handling.  Since
+    2:2.0.3-2 the SysV init scripts' "force-start" option was no longer
+    overriding noauto/noearly.  (Closes: #933142)
+  * Move some functions to d/function from the initramfs hook.
+  * SysV init scripts: skip devices holding the root FS and/or /usr during the
+    shutdown phase; these file systems are still mounted at this point so any
+    attempt to gracefully close the underlying device(s) is bound to fail.
+    (Closes: #916649, #918008)
+  * Bump Standards-Version to 4.5.0 (no changes necessary).
+
+ -- Guilhem Moulin <guilhem@debian.org>  Wed, 04 Mar 2020 00:48:19 +0100
+
+cryptsetup (2:2.2.2-3) unstable; urgency=high
+
+  * initramfs hook: Workaround fix for the libgcc_s's source location.
+    (Closes: #950628, #939766.)  Fixing #950254 will provide a better
+    solution.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Tue, 04 Feb 2020 14:11:12 +0100
+
+cryptsetup (2:2.2.2-2) unstable; urgency=medium
+
+  [ Guilhem Moulin ]
+  * d/initramfs/hooks/cryptroot: On initramfs images built with MODULES=dep,
+    include the IV generator found in the cipher specification when there is a
+    matching kernel module.  On 5.4 kernels ESSIV isn't implemented in
+    dm_crypt anymore, but by a dedicated 'essiv' module which thus needs to be
+    available in order to unlock dm-crypt target using 'aes-cbc-essiv:sha256'.
+    Closes: #948593.
+
+  [ Debian Janitor ]
+  * Set debhelper-compat version in Build-Depends.
+  * Set upstream metadata fields: Bug-Database, Bug-Submit, Repository,
+    Repository-Browse.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sat, 18 Jan 2020 20:53:19 +0100
+
+cryptsetup (2:2.2.2-1) unstable; urgency=medium
+
+  * New upstream bugfix release.
+  * debian/control:
+    + Add 'procps' to the Build-Depends since the upstream test suite uses
+      free(1).
+    + Bump Standards-Version to 4.4.1 (no changes necessary).
+
+ -- Guilhem Moulin <guilhem@debian.org>  Fri, 01 Nov 2019 19:32:36 +0100
+
+cryptsetup (2:2.2.1-1) unstable; urgency=medium
+
+  * New upstream bugfix release.
+  * Remove d/patches, applied upstream.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Fri, 06 Sep 2019 13:28:55 +0200
+
+cryptsetup (2:2.2.0-3) unstable; urgency=medium
+
+  * Cherry pick upstream commit 8f8f0b32: Fix mapped segments overflow on
+    32bit architectures.  Regression since 2:2.1.0-1.  (Closes: #935702)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Mon, 26 Aug 2019 12:53:45 +0200
+
+cryptsetup (2:2.2.0-2) unstable; urgency=medium
+
+  * debian/control: Add 'Multi-Arch: foreign' tag to the transitional dummy
+    package 'crytsetup-run'.
+  * debian/control, debian/compat: Bump debhelper compatibility level to 12.
+  * debian/rules: Remove dh_makeshlibs(1) override; debhelper 12.3's auto
+    detection feature subsumes our use of --add-udeb=.  This fixes FTBFS with
+    debhelper 12.5.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Wed, 21 Aug 2019 22:45:12 +0200
+
+cryptsetup (2:2.2.0-1) unstable; urgency=medium
+
+  * New upstream release 2.2.0.  Highlights include:
+    + New LUKS2 online reencryption extension, allowing reencryption of
+      mounted LUKS2 devices.
+    + Optional global serialization lock for memory hard PBKDF, to workaround
+      situations when multiple devices are unlocked in parallel, possibly
+      exhausting memory and triggering the OOM killer.  (Cf. #924560.)
+    + Add integritysetup support for bitmap mode (Linux >=5.2).
+    + Reduce keyslots area size in luksFormat when the header device is too
+      small.
+  * Remove d/patches, applied upstream.
+
+ -- Guilhem Moulin <guilhem@debian.org>  Thu, 15 Aug 2019 09:31:55 +0200
+
+cryptsetup (2:2.1.0-8) unstable; urgency=medium
+
+  * encrypted-boot.md:
+    + Clarify partition layout.
+    + encrypted-boot.md: New section 'Using a custom keyboard layout'.
+  * d/gbp.conf: New section [export-orig] mirroring [buildpackage].
+  * d/gitlab-ci.yml: Add 'publish' stage and make yamllint(1) happy.
+  * d/patches: Backport upstream commit c03e3fe8 so libcryptsetup's
+    crypt_keyslot_add_by_volume_key() also works a on LUKS2 header where all
+    bound key slots were deleted, like it does for LUKS1. (Closes: #934715)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Wed, 14 Aug 2019 16:34:23 +0200
+
+cryptsetup (2:2.1.0-7) unstable; urgency=low
+
+  * debian/cryptsetup.NEWS: Mention the 'cryptsetup' and 'cryptsetup-run'
+    package swap.
+  * debian/control: Add 'cryptsetup-initramfs' to 'cryptsetup's Recommends:,
+    so upgrading systems pull it automatically on upgrade.  (cryptsetup
+    <2:2.1.0-6 was a dummy transitional package depending on cryptsetup-run
+    and cryptsetup-initramfs.)  Closes: #932643.
+  * debian/control: Add 'cryptsetup-run' to 'cryptsetup's Recommends.  This
+    avoids it being removed by `apt upgrade --autoremove` from <2:2.1.0-6,
+    thus avoids the old cryptsetup-run's prerm script showing a scary (but
+    moot) warning.  After upgrading the prerm script is gone and the package
+    can be removed without troubles, so we can get rid of it after Bullseye.
+    (Closes: #932625.)
+  * cryptsetup-initramfs: Add loud warning upon "prerm remove" if there are
+    mapped crypt devices (like for cryptsetup.prerm).
+  * Thanks to David Prévot for helping with the upgrade path!
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sun, 21 Jul 2019 21:21:10 -0300
+
+cryptsetup (2:2.1.0-6) unstable; urgency=low
+
+  * debian/control:
+    + Add 'Multi-Arch: foreign' tags to 'cryptsetup-bin' and 'crytsetup-run',
+      as binaries from these packages are architecture independent.
+      (Closes: #930115)
+    + Add 'Build-Depends: jq, xxd' as the jq(1) and xxd(1) executables are
+      required for some upstream tests (skipped if the executables are not
+      found in $PATH).
+    + Swap 'cryptsetup' and 'cryptsetup-run' packages: the former now contains
+      init scripts, libraries, keyscripts, etc. while the latter is now a
+      transitional dummy package.
+    + Remove obsolete cryptsetup.maintscript.
+    + Bump Standards-Version to 4.4.0 (no changes necessary).
+  * debian/*:
+    + Fix path names for /usr/share/doc/cryptsetup*/**. (Closes: #904916).
+    + Remove compatibility warnings regarding setting 'CRYPTSETUP' in
+      the initramfs hook configuration.  The variable is no longer honored,
+      and cryptsetup is always integrated to the initramfs when the
+      'cryptsetup-initramfs' package is installed.
+  * debian/doc/pandoc/encrypted-boot.md: Minor refactoring.
+  * debian/gitlab-ci.yml: Adapt pandoc flags to Debian 9 (pass '-S').
+  * debian/initramfs/conf-hook: Clarify that KEYFILE_PATTERN isn't expanded
+    for crypttab(5) entries with a 'keyscript=' option. (Closes: #930696)
+  * debian/doc/crypttab.xml: Point to README.initramfs in the "See Also"
+    section. (Closes: #913233)
+
+ -- Guilhem Moulin <guilhem@debian.org>  Sat, 20 Jul 2019 22:15:04 -0300
+
 cryptsetup (2:2.1.0-5parrot1) parrot; urgency=medium
 
   * Import new Kali release.

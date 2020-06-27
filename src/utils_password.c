@@ -1,8 +1,8 @@
 /*
  * Password quality check wrapper
  *
- * Copyright (C) 2012-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2012-2019 Milan Broz
+ * Copyright (C) 2012-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2012-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -237,7 +237,7 @@ int tools_get_key(const char *prompt,
 		  int timeout, int verify, int pwquality,
 		  struct crypt_device *cd)
 {
-	char tmp[1024];
+	char tmp[PATH_MAX], *backing_file;
 	int r = -EINVAL, block;
 
 	block = tools_signals_blocked();
@@ -251,9 +251,11 @@ int tools_get_key(const char *prompt,
 			} else {
 				if (!prompt && !crypt_get_device_name(cd))
 					snprintf(tmp, sizeof(tmp), _("Enter passphrase: "));
-				else if (!prompt)
-					snprintf(tmp, sizeof(tmp), _("Enter passphrase for %s: "),
-						crypt_get_device_name(cd));
+				else if (!prompt) {
+					backing_file = crypt_loop_backing_file(crypt_get_device_name(cd));
+					snprintf(tmp, sizeof(tmp), _("Enter passphrase for %s: "), backing_file ?: crypt_get_device_name(cd));
+					free(backing_file);
+				}
 				r = crypt_get_key_tty(prompt ?: tmp, key, key_size, timeout, verify, cd);
 			}
 		} else {
@@ -283,11 +285,16 @@ void tools_passphrase_msg(int r)
 {
 	if (r == -EPERM)
 		log_err(_("No key available with this passphrase."));
+	else if (r == -ENOENT)
+		log_err(_("No usable keyslot is available."));
 }
 
 int tools_read_mk(const char *file, char **key, int keysize)
 {
 	int fd;
+
+	if (!keysize || !key)
+		return -EINVAL;
 
 	*key = crypt_safe_alloc(keysize);
 	if (!*key)
@@ -298,7 +305,8 @@ int tools_read_mk(const char *file, char **key, int keysize)
 		log_err(_("Cannot read keyfile %s."), file);
 		goto fail;
 	}
-	if ((read(fd, *key, keysize) != keysize)) {
+
+	if (read_buffer(fd, *key, keysize) != keysize) {
 		log_err(_("Cannot read %d bytes from keyfile %s."), keysize, file);
 		close(fd);
 		goto fail;

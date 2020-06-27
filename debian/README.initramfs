@@ -203,8 +203,8 @@ the `decrypt_keyctl` keyscript.
 
 Note: If you don't use suspend device support, it's better to use completely
 random keys for your encrypted swap device. See the section '2. Encrypted
-swap partition(s)' in `/usr/share/doc/cryptsetup/README.Debian` for information
-on how to setup this.
+swap partition(s)' in `/usr/share/doc/cryptsetup/README.Debian.gz` for
+information on how to setup this.
 
 10. The `passdev` keyscript
 ----------------------------

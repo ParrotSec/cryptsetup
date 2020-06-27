@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004 Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2019 Milan Broz
+ * Copyright (C) 2009-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -33,6 +33,17 @@ struct crypt_params_verity;
 struct device;
 struct crypt_params_integrity;
 
+/* Device mapper internal flags */
+#define DM_RESUME_PRIVATE      (1 << 4) /* CRYPT_ACTIVATE_PRIVATE */
+#define DM_SUSPEND_SKIP_LOCKFS (1 << 5)
+#define DM_SUSPEND_WIPE_KEY    (1 << 6)
+#define DM_SUSPEND_NOFLUSH     (1 << 7)
+
+static inline uint32_t act2dmflags(uint32_t act_flags)
+{
+	return (act_flags & DM_RESUME_PRIVATE);
+}
+
 /* Device mapper backend - kernel support flags */
 #define DM_KEY_WIPE_SUPPORTED (1 << 0)	/* key wipe message */
 #define DM_LMK_SUPPORTED      (1 << 1)	/* lmk mode */
@@ -51,8 +62,15 @@ struct crypt_params_integrity;
 #define DM_CAPI_STRING_SUPPORTED (1 << 14) /* support for cryptoapi format cipher definition */
 #define DM_DEFERRED_SUPPORTED (1 << 15) /* deferred removal of device */
 #define DM_INTEGRITY_RECALC_SUPPORTED (1 << 16) /* dm-integrity automatic recalculation supported */
+#define DM_INTEGRITY_BITMAP_SUPPORTED (1 << 17) /* dm-integrity bitmap mode supported */
+#define DM_GET_TARGET_VERSION_SUPPORTED (1 << 18) /* dm DM_GET_TARGET version ioctl supported */
+#define DM_INTEGRITY_FIX_PADDING_SUPPORTED (1 << 19) /* supports the parameter fix_padding that fixes a bug that caused excessive padding */
+#define DM_BITLK_EBOIV_SUPPORTED (1 << 20) /* EBOIV for BITLK supported */
+#define DM_BITLK_ELEPHANT_SUPPORTED (1 << 21) /* Elephant diffuser for BITLK supported */
+#define DM_VERITY_SIGNATURE_SUPPORTED (1 << 22) /* Verity option root_hash_sig_key_desc supported */
+#define DM_INTEGRITY_DISCARDS_SUPPORTED (1 << 23) /* dm-integrity discards/TRIM option is supported */
 
-typedef enum { DM_CRYPT = 0, DM_VERITY, DM_INTEGRITY, DM_LINEAR, DM_UNKNOWN } dm_target_type;
+typedef enum { DM_CRYPT = 0, DM_VERITY, DM_INTEGRITY, DM_LINEAR, DM_ERROR, DM_ZERO, DM_UNKNOWN } dm_target_type;
 enum tdirection { TARGET_SET = 1, TARGET_QUERY };
 
 int dm_flags(struct crypt_device *cd, dm_target_type target, uint32_t *flags);
@@ -97,6 +115,7 @@ struct dm_target {
 
 		const char *root_hash;
 		uint32_t root_hash_size;
+		const char *root_hash_sig_key_desc;
 
 		uint64_t hash_offset;	/* hash offset in blocks (not header) */
 		uint64_t hash_blocks;	/* size of hash device (in hash blocks) */
@@ -125,10 +144,14 @@ struct dm_target {
 		struct volume_key *journal_crypt_key;
 
 		struct device *meta_device;
+
+		bool fix_padding;
 	} integrity;
 	struct {
 		uint64_t offset;
 	} linear;
+	struct {
+	} zero;
 	} u;
 
 	char *params;
@@ -156,22 +179,24 @@ void dm_backend_exit(struct crypt_device *cd);
 int dm_targets_allocate(struct dm_target *first, unsigned count);
 void dm_targets_free(struct crypt_device *cd, struct crypt_dm_active_device *dmd);
 
-int dm_crypt_target_set(struct dm_target *tgt, size_t seg_offset, size_t seg_size,
+int dm_crypt_target_set(struct dm_target *tgt, uint64_t seg_offset, uint64_t seg_size,
 	struct device *data_device, struct volume_key *vk, const char *cipher,
-	size_t iv_offset, size_t data_offset, const char *integrity,
+	uint64_t iv_offset, uint64_t data_offset, const char *integrity,
 	uint32_t tag_size, uint32_t sector_size);
-int dm_verity_target_set(struct dm_target *tgt, size_t seg_offset, size_t seg_size,
+int dm_verity_target_set(struct dm_target *tgt, uint64_t seg_offset, uint64_t seg_size,
 	struct device *data_device, struct device *hash_device, struct device *fec_device,
-	const char *root_hash, uint32_t root_hash_size, uint64_t hash_offset_block,
-	uint64_t hash_blocks, struct crypt_params_verity *vp);
-int dm_integrity_target_set(struct dm_target *tgt, size_t seg_offset, size_t seg_size,
+	const char *root_hash, uint32_t root_hash_size, const char *root_hash_sig_key_desc,
+	uint64_t hash_offset_block, uint64_t hash_blocks, struct crypt_params_verity *vp);
+int dm_integrity_target_set(struct crypt_device *cd,
+	struct dm_target *tgt, uint64_t seg_offset, uint64_t seg_size,
 	struct device *meta_device,
 	struct device *data_device, uint64_t tag_size, uint64_t offset, uint32_t sector_size,
 	struct volume_key *vk,
 	struct volume_key *journal_crypt_key, struct volume_key *journal_mac_key,
 	const struct crypt_params_integrity *ip);
-int dm_linear_target_set(struct dm_target *tgt, size_t seg_offset, size_t seg_size,
-	struct device *data_device, size_t data_offset);
+int dm_linear_target_set(struct dm_target *tgt, uint64_t seg_offset, uint64_t seg_size,
+	struct device *data_device, uint64_t data_offset);
+int dm_zero_target_set(struct dm_target *tgt, uint64_t seg_offset, uint64_t seg_size);
 
 int dm_remove_device(struct crypt_device *cd, const char *name, uint32_t flags);
 int dm_status_device(struct crypt_device *cd, const char *name);
@@ -180,13 +205,14 @@ int dm_status_verity_ok(struct crypt_device *cd, const char *name);
 int dm_status_integrity_failures(struct crypt_device *cd, const char *name, uint64_t *count);
 int dm_query_device(struct crypt_device *cd, const char *name,
 		    uint32_t get_flags, struct crypt_dm_active_device *dmd);
+int dm_device_deps(struct crypt_device *cd, const char *name, const char *prefix,
+		   char **names, size_t names_length);
 int dm_create_device(struct crypt_device *cd, const char *name,
 		     const char *type, struct crypt_dm_active_device *dmd);
 int dm_reload_device(struct crypt_device *cd, const char *name,
-		     struct crypt_dm_active_device *dmd, unsigned resume);
-int dm_suspend_device(struct crypt_device *cd, const char *name);
-int dm_suspend_and_wipe_key(struct crypt_device *cd, const char *name);
-int dm_resume_device(struct crypt_device *cd, const char *name, uint32_t flags);
+		     struct crypt_dm_active_device *dmd, uint32_t dmflags, unsigned resume);
+int dm_suspend_device(struct crypt_device *cd, const char *name, uint32_t dmflags);
+int dm_resume_device(struct crypt_device *cd, const char *name, uint32_t dmflags);
 int dm_resume_and_reinstate_key(struct crypt_device *cd, const char *name,
 				const struct volume_key *vk);
 int dm_error_device(struct crypt_device *cd, const char *name);
@@ -197,8 +223,9 @@ const char *dm_get_dir(void);
 int lookup_dm_dev_by_uuid(struct crypt_device *cd, const char *uuid, const char *type);
 
 /* These are DM helpers used only by utils_devpath file */
-int dm_is_dm_device(int major, int minor);
+int dm_is_dm_device(int major);
 int dm_is_dm_kernel_name(const char *name);
 char *dm_device_path(const char *prefix, int major, int minor);
+char *dm_device_name(const char *path);
 
 #endif /* _UTILS_DM_H */

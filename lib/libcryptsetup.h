@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004 Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2019 Milan Broz
+ * Copyright (C) 2009-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -414,6 +414,8 @@ int crypt_get_metadata_size(struct crypt_device *cd,
 #define CRYPT_TCRYPT "TCRYPT"
 /** INTEGRITY dm-integrity device */
 #define CRYPT_INTEGRITY "INTEGRITY"
+/** BITLK (BitLocker-compatible mode) */
+#define CRYPT_BITLK "BITLK"
 
 /** LUKS any version */
 #define CRYPT_LUKS NULL
@@ -505,6 +507,8 @@ struct crypt_params_verity {
 #define CRYPT_VERITY_CHECK_HASH  (1 << 1)
 /** Create hash - format hash device */
 #define CRYPT_VERITY_CREATE_HASH (1 << 2)
+/** Root hash signature required for activation */
+#define CRYPT_VERITY_ROOT_HASH_SIGNATURE (1 << 3)
 
 /**
  *
@@ -546,11 +550,15 @@ struct crypt_params_tcrypt {
  *
  * @see crypt_format, crypt_load
  *
+ * @note In bitmap tracking mode, the journal is implicitly disabled.
+ *       As an ugly workaround for compatibility, journal_watermark is overloaded
+ *       to mean 512-bytes sectors-per-bit and journal_commit_time means bitmap flush time.
+ *       All other journal parameters are not applied in the bitmap mode.
  */
 struct crypt_params_integrity {
 	uint64_t journal_size;               /**< size of journal in bytes */
-	unsigned int journal_watermark;      /**< journal flush watermark in percents */
-	unsigned int journal_commit_time;    /**< journal commit time in ms */
+	unsigned int journal_watermark;      /**< journal flush watermark in percents; in bitmap mode sectors-per-bit  */
+	unsigned int journal_commit_time;    /**< journal commit time (or bitmap flush time) in ms */
 	uint32_t interleave_sectors;         /**< number of interleave sectors (power of two) */
 	uint32_t tag_size;                   /**< tag size per-sector in bytes */
 	uint32_t sector_size;                /**< sector size in bytes */
@@ -624,6 +632,26 @@ int crypt_format(struct crypt_device *cd,
 	const char *volume_key,
 	size_t volume_key_size,
 	void *params);
+
+/**
+ * Set format compatibility flags.
+ *
+ * @param cd crypt device handle
+ * @param flags CRYPT_COMPATIBILITY_* flags
+ */
+void crypt_set_compatibility(struct crypt_device *cd, uint32_t flags);
+
+/**
+ * Get compatibility flags.
+ *
+ * @param cd crypt device handle
+ *
+ * @returns compatibility flags
+ */
+uint32_t crypt_get_compatibility(struct crypt_device *cd);
+
+/** dm-integrity device uses less effective (legacy) padding (old kernels) */
+#define CRYPT_COMPAT_LEGACY_INTEGRITY_PADDING (1 << 0)
 
 /**
  * Convert to new type for already existing device.
@@ -824,6 +852,20 @@ int crypt_resume_by_keyfile(struct crypt_device *cd,
 	int keyslot,
 	const char *keyfile,
 	size_t keyfile_size);
+/**
+ * Resume crypt device using provided volume key.
+ *
+ * @param cd crypt device handle
+ * @param name name of device to resume
+ * @param volume_key provided volume key
+ * @param volume_key_size size of volume_key
+ *
+ * @return @e 0 on success or negative errno value otherwise.
+ */
+int crypt_resume_by_volume_key(struct crypt_device *cd,
+	const char *name,
+	const char *volume_key,
+	size_t volume_key_size);
 /** @} */
 
 /**
@@ -870,10 +912,6 @@ int crypt_keyslot_add_by_passphrase(struct crypt_device *cd,
  * @param new_passphrase_size size of @e new_passphrase (binary data)
  *
  * @return allocated key slot number or negative errno otherwise.
- *
- * @note This function is just internal implementation of luksChange
- * command to avoid reading of volume key outside libcryptsetup boundary
- * in FIPS mode.
  */
 int crypt_keyslot_change_by_passphrase(struct crypt_device *cd,
 	int keyslot_old,
@@ -956,6 +994,9 @@ int crypt_keyslot_add_by_volume_key(struct crypt_device *cd,
 
 /** create keyslot with new volume key and assign it to current dm-crypt segment */
 #define CRYPT_VOLUME_KEY_SET (1 << 1)
+
+/** Assign key to first matching digest before creating new digest */
+#define CRYPT_VOLUME_KEY_DIGEST_REUSE (1 << 2)
 
 /**
  * Add key slot using provided key.
@@ -1054,6 +1095,14 @@ int crypt_keyslot_destroy(struct crypt_device *cd, int keyslot);
 #define CRYPT_ACTIVATE_RECALCULATE (1 << 17)
 /** reactivate existing and update flags, input only */
 #define CRYPT_ACTIVATE_REFRESH	(1 << 18)
+/** Use global lock to serialize memory hard KDF on activation (OOM workaround) */
+#define CRYPT_ACTIVATE_SERIALIZE_MEMORY_HARD_PBKDF (1 << 19)
+/** dm-integrity: direct writes, use bitmap to track dirty sectors */
+#define CRYPT_ACTIVATE_NO_JOURNAL_BITMAP (1 << 20)
+/** device is suspended (key should be wiped from memory), output only */
+#define CRYPT_ACTIVATE_SUSPENDED (1 << 21)
+/** use IV sector counted in sector_size instead of default 512 bytes sectors */
+#define CRYPT_ACTIVATE_IV_LARGE_SECTORS (1 << 22)
 
 /**
  * Active device runtime attributes
@@ -1103,6 +1152,8 @@ uint64_t crypt_get_active_integrity_failures(struct crypt_device *cd,
  */
 /** Unfinished offline reencryption */
 #define CRYPT_REQUIREMENT_OFFLINE_REENCRYPT	(1 << 0)
+/** Online reencryption in-progress */
+#define CRYPT_REQUIREMENT_ONLINE_REENCRYPT	(1 << 1)
 /** unknown requirement in header (output only) */
 #define CRYPT_REQUIREMENT_UNKNOWN		(1 << 31)
 
@@ -1244,6 +1295,31 @@ int crypt_activate_by_volume_key(struct crypt_device *cd,
 	uint32_t flags);
 
 /**
+ * Activate VERITY device using provided key and optional signature).
+ *
+ * @param cd crypt device handle
+ * @param name name of device to create
+ * @param volume_key provided volume key
+ * @param volume_key_size size of volume_key
+ * @param signature buffer with signature for the key
+ * @param signature_size bsize of signature buffer
+ * @param flags activation flags
+ *
+ * @return @e 0 on success or negative errno value otherwise.
+ *
+ * @note For VERITY the volume key means root hash required for activation.
+ *	Because kernel dm-verity is always read only, you have to provide
+ *	CRYPT_ACTIVATE_READONLY flag always.
+ */
+int crypt_activate_by_signed_key(struct crypt_device *cd,
+	const char *name,
+	const char *volume_key,
+	size_t volume_key_size,
+	const char *signature,
+	size_t signature_size,
+	uint32_t flags);
+
+/**
  * Activate device using passphrase stored in kernel keyring.
  *
  * @param cd crypt device handle
@@ -1313,6 +1389,7 @@ int crypt_deactivate(struct crypt_device *cd, const char *name);
  *
  * @note For TCRYPT cipher chain is the volume key concatenated
  * 	 for all ciphers in chain.
+ * @note For VERITY the volume key means root hash used for activation.
  */
 int crypt_volume_key_get(struct crypt_device *cd,
 	int keyslot,
@@ -1448,6 +1525,8 @@ uint64_t crypt_get_iv_offset(struct crypt_device *cd);
  *
  * @return volume key size
  *
+ * @note For LUKS2, this function can be used only if there is at least
+ *       one keyslot assigned to data segment.
  */
 int crypt_get_volume_key_size(struct crypt_device *cd);
 
@@ -1739,7 +1818,7 @@ int crypt_header_restore(struct crypt_device *cd,
 
 /** Debug all */
 #define CRYPT_DEBUG_ALL  -1
-/** Debug all with adidtional JSON dump (for LUKS2) */
+/** Debug all with additional JSON dump (for LUKS2) */
 #define CRYPT_DEBUG_JSON  -2
 /** Debug none */
 #define CRYPT_DEBUG_NONE  0
@@ -2096,6 +2175,195 @@ int crypt_activate_by_token(struct crypt_device *cd,
 	int token,
 	void *usrptr,
 	uint32_t flags);
+/** @} */
+
+/**
+ * @defgroup crypt-reencryption LUKS2 volume reencryption support
+ *
+ * Set of functions to handling LUKS2 volume reencryption
+ *
+ * @addtogroup crypt-reencryption
+ * @{
+ */
+
+/** Initialize reencryption metadata but do not run reencryption yet. (in) */
+#define CRYPT_REENCRYPT_INITIALIZE_ONLY    (1 << 0)
+/** Move the first segment, used only with data shift. (in/out) */
+#define CRYPT_REENCRYPT_MOVE_FIRST_SEGMENT (1 << 1)
+/** Resume already initialized reencryption only. (in) */
+#define CRYPT_REENCRYPT_RESUME_ONLY        (1 << 2)
+/** Run reencryption recovery only. (in) */
+#define CRYPT_REENCRYPT_RECOVERY           (1 << 3)
+
+/**
+ * Reencryption direction
+ */
+typedef enum {
+	CRYPT_REENCRYPT_FORWARD = 0, /**< forward direction */
+	CRYPT_REENCRYPT_BACKWARD     /**< backward direction */
+} crypt_reencrypt_direction_info;
+
+/**
+ * Reencryption mode
+ */
+typedef enum {
+	CRYPT_REENCRYPT_REENCRYPT = 0, /**< Reencryption mode */
+	CRYPT_REENCRYPT_ENCRYPT,       /**< Encryption mode */
+	CRYPT_REENCRYPT_DECRYPT,       /**< Decryption mode */
+} crypt_reencrypt_mode_info;
+
+/**
+ * LUKS2 reencryption options.
+ */
+struct crypt_params_reencrypt {
+	crypt_reencrypt_mode_info mode;           /**< Reencryption mode, immutable after first init. */
+	crypt_reencrypt_direction_info direction; /**< Reencryption direction, immutable after first init. */
+	const char *resilience;                   /**< Resilience mode: "none", "checksum", "journal" or "shift" (only "shift" is immutable after init) */
+	const char *hash;                         /**< Used hash for "checksum" resilience type, ignored otherwise. */
+	uint64_t data_shift;                      /**< Used in "shift" mode, must be non-zero, immutable after first init. */
+	uint64_t max_hotzone_size;                /**< Exact hotzone size for "none" mode. Maximum hotzone size for "checksum" and "journal" modes. */
+	uint64_t device_size;			  /**< Reencrypt only initial part of the data device. */
+	const struct crypt_params_luks2 *luks2;   /**< LUKS2 parameters for the final reencryption volume.*/
+	uint32_t flags;                           /**< Reencryption flags. */
+};
+
+/**
+ * Initialize reencryption metadata using passphrase.
+ *
+ * This function initializes on-disk metadata to include all reencryption segments,
+ * according to the provided options.
+ * If metadata already contains ongoing reencryption metadata, it loads these parameters
+ * (in this situation all parameters except @e name and @e passphrase can be omitted).
+ *
+ * @param cd crypt device handle
+ * @param name name of active device or @e NULL for offline reencryption
+ * @param passphrase passphrase used to unlock volume key
+ * @param passphrase_size size of @e passphrase (binary data)
+ * @param keyslot_old keyslot to unlock existing device or CRYPT_ANY_SLOT
+ * @param keyslot_new existing (unbound) reencryption keyslot; must be set except for decryption
+ * @param cipher cipher specification (e.g. "aes")
+ * @param cipher_mode cipher mode and IV (e.g. "xts-plain64")
+ * @param params reencryption parameters @link crypt_params_reencrypt @endlink.
+ *
+ * @return reencryption key slot number or negative errno otherwise.
+ */
+int crypt_reencrypt_init_by_passphrase(struct crypt_device *cd,
+	const char *name,
+	const char *passphrase,
+	size_t passphrase_size,
+	int keyslot_old,
+	int keyslot_new,
+	const char *cipher,
+	const char *cipher_mode,
+	const struct crypt_params_reencrypt *params);
+
+/**
+ * Initialize reencryption metadata using passphrase in keyring.
+ *
+ * This function initializes on-disk metadata to include all reencryption segments,
+ * according to the provided options.
+ * If metadata already contains ongoing reencryption metadata, it loads these parameters
+ * (in this situation all parameters except @e name and @e key_description can be omitted).
+ *
+ * @param cd crypt device handle
+ * @param name name of active device or @e NULL for offline reencryption
+ * @param key_description passphrase (key) identification in keyring
+ * @param keyslot_old keyslot to unlock existing device or CRYPT_ANY_SLOT
+ * @param keyslot_new existing (unbound) reencryption keyslot; must be set except for decryption
+ * @param cipher cipher specification (e.g. "aes")
+ * @param cipher_mode cipher mode and IV (e.g. "xts-plain64")
+ * @param params reencryption parameters @link crypt_params_reencrypt @endlink.
+ *
+ * @return reencryption key slot number or negative errno otherwise.
+ */
+int crypt_reencrypt_init_by_keyring(struct crypt_device *cd,
+	const char *name,
+	const char *key_description,
+	int keyslot_old,
+	int keyslot_new,
+	const char *cipher,
+	const char *cipher_mode,
+	const struct crypt_params_reencrypt *params);
+
+/**
+ * Run data reencryption.
+ *
+ * @param cd crypt device handle
+ * @param progress is a callback funtion reporting device \b size,
+ * current \b offset of reencryption and provided \b usrptr identification
+ *
+ * @return @e 0 on success or negative errno value otherwise.
+ */
+int crypt_reencrypt(struct crypt_device *cd,
+		    int (*progress)(uint64_t size, uint64_t offset, void *usrptr));
+
+/**
+ * Reencryption status info
+ */
+typedef enum {
+	CRYPT_REENCRYPT_NONE = 0, /**< No reencryption in progress */
+	CRYPT_REENCRYPT_CLEAN,    /**< Ongoing reencryption in a clean state. */
+	CRYPT_REENCRYPT_CRASH,    /**< Aborted reencryption that need internal recovery. */
+	CRYPT_REENCRYPT_INVALID   /**< Invalid state. */
+} crypt_reencrypt_info;
+
+/**
+ * LUKS2 reencryption status.
+ *
+ * @param cd crypt device handle
+ * @param params reencryption parameters
+ *
+ * @return reencryption status info and parameters.
+ */
+crypt_reencrypt_info crypt_reencrypt_status(struct crypt_device *cd,
+		struct crypt_params_reencrypt *params);
+/** @} */
+
+/**
+ * @defgroup crypt-memory Safe memory helpers functions
+ * @addtogroup crypt-memory
+ * @{
+ */
+
+/**
+ * Allocate safe memory (content is safely wiped on deallocation).
+ *
+ * @param size size of memory in bytes
+ *
+ * @return pointer to allocate memory or @e NULL.
+ */
+void *crypt_safe_alloc(size_t size);
+
+/**
+ * Release safe memory, content is safely wiped
+ * The pointer must be allocated with @link crypt_safe_alloc @endlink
+ *
+ * @param data pointer to memory to be deallocated
+ *
+ * @return pointer to allocate memory or @e NULL.
+ */
+void crypt_safe_free(void *data);
+
+/**
+ * Reallocate safe memory (content is copied and safely wiped on deallocation).
+ *
+ * @param data pointer to memory to be deallocated
+ * @param size new size of memory in bytes
+ *
+ * @return pointer to allocate memory or @e NULL.
+ */
+void *crypt_safe_realloc(void *data, size_t size);
+
+/**
+ * Safe clear memory area (compile should not compile this call out).
+ *
+ * @param data pointer to memory to cleared
+ * @param size new size of memory in bytes
+ *
+ * @return pointer to allocate memory or @e NULL.
+ */
+void crypt_safe_memzero(void *data, size_t size);
+
 /** @} */
 
 #ifdef __cplusplus

@@ -3,21 +3,6 @@
 #
 
 #
-# CRYPTSETUP: [ y | n ]
-#
-# Add cryptsetup and its dependencies to the initramfs image, regardless
-# of _this_ machine configuration.  By default, they're only added when
-# a device is detected that needs to be unlocked at initramfs stage
-# (such as root or resume devices or ones with explicit 'initramfs' flag
-# in /etc/crypttab).
-# Note: Honoring this setting will be deprecated in the future.  Please
-# uninstall the 'cryptsetup-initramfs' package if you don't want the
-# cryptsetup initramfs integration.
-#
-
-#CRYPTSETUP=
-
-#
 # KEYFILE_PATTERN: ...
 #
 # The value of this variable is interpreted as a shell pattern.
@@ -29,6 +14,10 @@
 #
 # If KEYFILE_PATTERN if null or unset (default) then no key file is
 # copied to the initramfs image.
+#
+# Note that the glob(7) is not expanded for crypttab(5) entries with a
+# 'keyscript=' option.  In that case, the field is not treated as a file
+# name but given as argument to the keyscript.
 #
 # WARNING: If the initramfs image is to include private key material,
 # you'll want to create it with a restrictive umask in order to keep

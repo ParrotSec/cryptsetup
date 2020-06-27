@@ -3,8 +3,8 @@
  *
  * Copyright (C) 2004 Jana Saout <jana@saout.de>
  * Copyright (C) 2004-2007 Clemens Fruhwirth <clemens@endorphin.org>
- * Copyright (C) 2009-2019 Red Hat, Inc. All rights reserved.
- * Copyright (C) 2009-2019 Milan Broz
+ * Copyright (C) 2009-2020 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2009-2020 Milan Broz
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -23,7 +23,6 @@
 
 #include <stdio.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -130,7 +129,7 @@ static int keyfile_seek(int fd, uint64_t bytes)
 			if (errno == EINTR)
 				continue;
 
-			crypt_memzero(tmp, sizeof(tmp));
+			crypt_safe_memzero(tmp, sizeof(tmp));
 			/* read error */
 			return -1;
 		}
@@ -142,7 +141,7 @@ static int keyfile_seek(int fd, uint64_t bytes)
 		bytes -= bytes_r;
 	}
 
-	crypt_memzero(tmp, sizeof(tmp));
+	crypt_safe_memzero(tmp, sizeof(tmp));
 	return bytes == 0 ? 0 : -1;
 }
 
@@ -181,7 +180,7 @@ int crypt_keyfile_device_read(struct crypt_device *cd,  const char *keyfile,
 		key_size = DEFAULT_KEYFILE_SIZE_MAXKB * 1024 + 1;
 		unlimited_read = 1;
 		/* use 4k for buffer (page divisor but avoid huge pages) */
-		buflen = 4096 - sizeof(struct safe_allocation);
+		buflen = 4096 - sizeof(size_t); // sizeof(struct safe_allocation);
 	} else
 		buflen = key_size;
 
@@ -322,4 +321,25 @@ int kernel_version(uint64_t *kversion)
 		*kversion = version(maj, min, patch, rel);
 
 	return r;
+}
+
+bool crypt_string_in(const char *str, char **list, size_t list_size)
+{
+	size_t i;
+
+	for (i = 0; *list && i < list_size; i++, list++)
+		if (!strcmp(str, *list))
+			return true;
+
+	return false;
+}
+
+/* compare two strings (allows NULL values) */
+int crypt_strcmp(const char *a, const char *b)
+{
+	if (!a && !b)
+		return 0;
+	else if (!a || !b)
+		return 1;
+	return strcmp(a, b);
 }

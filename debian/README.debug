@@ -23,7 +23,7 @@ following steps are required:
   In grub, this can be done interactively from the grub boot menu: `<E>` to
   edit, and `<Ctrl>+<X>` to boot once you've edited the kernel line.
 
-  See https://help.ubuntu.com/community/Grub2/Troubleshooting#Editing_the_GRUB_2_Menu_During_Boot
+  See <https://help.ubuntu.com/community/Grub2/Troubleshooting#Editing_the_GRUB_2_Menu_During_Boot>
   for details.
 
 * Append `-x` to the shebang (first line) of cryptroot initramfs script:
@@ -43,7 +43,7 @@ following steps are required:
   will be lost after reboot.
 
 Sometimes, debugging the initramfs directly can be helpful as well. See
-https://wiki.debian.org/InitramfsDebug#Saving_debug_information for details.
+<https://wiki.debian.org/InitramfsDebug#Saving_debug_information> for details.
 
 Gather debugging information in the initramfs rescue shell
 ----------------------------------------------------------
@@ -55,13 +55,14 @@ Useful commands to gather information from initramfs rescue shell:
 
       ls -l /sys/class/misc/device-mapper /sys/devices/virtual/misc/device-mapper
 
-* Check, whether dm-crypt kernel module is loaded:
+* Check whether dm-crypt kernel module is loaded:
 
       lsmod | grep dm-crypt
 
 * Display cryptroot configuration and list loaded kernel modules:
 
-      cat /conf/conf.d/cryptroot
+      cat /cryptroot/crypttab
+      lsmod
 
 * Gather information about the available block devices:
 
